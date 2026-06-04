@@ -36,12 +36,28 @@ pip install -r requirements-dev.txt
 uvicorn app.main:app --reload --port 8001
 ```
 
+首次启动或模型发生变化后，执行数据库迁移：
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+alembic upgrade head
+```
+
 启动 Celery Worker：
 
 ```powershell
 cd backend
 .\.venv\Scripts\Activate.ps1
 celery -A app.tasks.celery_app:celery_app worker --loglevel=info --pool=solo
+```
+
+启动 Celery Beat：
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+celery -A app.tasks.celery_app:celery_app beat --loglevel=info
 ```
 
 启动前端：
@@ -57,5 +73,17 @@ npm run dev -- --port 5174
 - FastAPI 文档：`http://localhost:8001/docs`
 - FastAPI 健康检查：`http://localhost:8001/health`
 - Vue3 开发服务：`http://localhost:5174`
+
+## 阶段二功能
+
+- 添加、编辑、暂停、恢复和删除监控账号
+- 按平台、状态、昵称、账号 ID 和分组筛选账号
+- MockCollector 模拟公开账号数据采集
+- 添加账号时自动生成首次数据快照
+- 支持手动立即采集
+- Celery Beat 每分钟扫描到期账号并自动采集
+- 展示账号粉丝、获赞、作品数与历史趋势
+
+当前采集器为 MockCollector，用于验证完整监控链路。真实抖音和小红书公开数据采集将在后续阶段接入。
 
 完整项目规划见 [PROJECT_PLAN.md](./PROJECT_PLAN.md)。

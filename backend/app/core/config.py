@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     redis_host: str = "127.0.0.1"
     redis_port: int = 16379
     redis_db: int = 0
-    cors_origins: str = "http://localhost:5174"
+    cors_origins: str = "http://localhost:5174,http://127.0.0.1:5174"
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

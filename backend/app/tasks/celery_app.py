@@ -6,7 +6,7 @@ celery_app = Celery(
     "creator_monitoring",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.health"],
+    include=["app.tasks.collection", "app.tasks.health"],
 )
 
 celery_app.conf.update(
@@ -15,4 +15,12 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="Asia/Shanghai",
     enable_utc=True,
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
+    beat_schedule={
+        "schedule-due-creators-every-minute": {
+            "task": "creators.schedule_due",
+            "schedule": 60.0,
+        }
+    },
 )
