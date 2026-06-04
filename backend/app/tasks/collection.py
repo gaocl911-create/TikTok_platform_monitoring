@@ -18,6 +18,8 @@ def collect_creator_task(creator_id: int) -> dict[str, int | str]:
             "snapshot_id": snapshot.id,
             "run_id": run.id,
             "status": run.status,
+            "new_content_count": int((run.result_summary or {}).get("new_content_count", 0)),
+            "alert_count": int((run.result_summary or {}).get("alert_count", 0)),
         }
 
 

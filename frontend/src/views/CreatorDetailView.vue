@@ -7,6 +7,8 @@ import { useRoute, useRouter } from 'vue-router'
 import TrendChart from '../components/TrendChart.vue'
 import { useCreatorStore } from '../stores/creators'
 import type { Creator, CreatorSnapshot } from '../types/creator'
+import { collectorLabel, qualityDescription, qualityLabel } from '../utils/collector'
+import { formatApiDateTime } from '../utils/datetime'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,11 +19,14 @@ const loading = ref(true)
 const collecting = ref(false)
 const metric = ref<'follower_count' | 'total_like_count'>('follower_count')
 const creatorId = computed(() => Number(route.params.id))
+const sourceSnapshots = computed(() =>
+  snapshots.value.filter((snapshot) => snapshot.collector_type === creator.value?.collector_type),
+)
 
 const followerDelta = computed(() => {
-  if (snapshots.value.length < 2) return 0
-  const latest = snapshots.value.at(-1)!
-  const previous = snapshots.value.at(-2)!
+  if (sourceSnapshots.value.length < 2) return 0
+  const latest = sourceSnapshots.value.at(-1)!
+  const previous = sourceSnapshots.value.at(-2)!
   return latest.follower_count - previous.follower_count
 })
 
@@ -31,7 +36,7 @@ function formatNumber(value: number | undefined) {
 
 function formatTime(value: string | null | undefined) {
   if (!value) return '尚未采集'
-  return new Date(value).toLocaleString('zh-CN')
+  return formatApiDateTime(value)
 }
 
 async function load() {
@@ -49,8 +54,12 @@ async function load() {
 async function collect() {
   collecting.value = true
   try {
-    await store.collectCreator(creatorId.value)
-    ElMessage.success('公开数据快照已更新')
+    const result = await store.collectCreator(creatorId.value)
+    if (result.run.status === 'partial') {
+      ElMessage.warning('真实账号指标已更新，作品明细暂不可用')
+    } else {
+      ElMessage.success('公开数据快照已更新')
+    }
     await load()
   } finally {
     collecting.value = false
@@ -109,6 +118,18 @@ onMounted(load)
         </div>
       </section>
 
+      <section class="collection-health" :class="creator.data_quality_status">
+        <div>
+          <span>数据来源</span>
+          <strong>{{ collectorLabel(creator.collector_type) }}</strong>
+        </div>
+        <div>
+          <span>数据质量</span>
+          <strong>{{ qualityLabel(creator.data_quality_status) }}</strong>
+        </div>
+        <p>{{ qualityDescription(creator) }}</p>
+      </section>
+
       <section class="metric-grid">
         <article class="metric-block">
           <span>粉丝</span>
@@ -128,7 +149,15 @@ onMounted(load)
         <article class="metric-block">
           <span>公开作品</span>
           <strong>{{ formatNumber(creator.content_count) }}</strong>
-          <small>内容监控将在阶段三接入</small>
+          <small>
+            {{
+              creator.last_content_status === 'success'
+                ? creator.collector_type === 'mock'
+                  ? '模拟作品数据'
+                  : '真实作品明细可用'
+                : '真实作品明细暂不可用'
+            }}
+          </small>
         </article>
       </section>
 
@@ -146,7 +175,7 @@ onMounted(load)
             ]"
           />
         </div>
-        <TrendChart v-if="snapshots.length" :snapshots="snapshots" :metric="metric" />
+        <TrendChart v-if="sourceSnapshots.length" :snapshots="sourceSnapshots" :metric="metric" />
         <el-empty v-else description="暂无历史快照" />
       </section>
 
@@ -154,10 +183,10 @@ onMounted(load)
         <div class="section-heading">
           <div>
             <h2>采集记录</h2>
-            <p>最近 {{ snapshots.length }} 条成功快照</p>
+            <p>当前数据来源最近 {{ sourceSnapshots.length }} 条可用账号快照</p>
           </div>
         </div>
-        <el-table :data="[...snapshots].reverse()" empty-text="暂无快照">
+        <el-table :data="[...sourceSnapshots].reverse()" empty-text="暂无当前来源快照">
           <el-table-column label="采集时间" min-width="190">
             <template #default="{ row }">{{ formatTime(row.captured_at) }}</template>
           </el-table-column>

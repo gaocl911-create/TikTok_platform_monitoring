@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.collectors import CollectorError
 from app.core.database import get_db
 from app.schemas.creator import (
     CollectionResult,
@@ -43,7 +44,13 @@ def create_creator_endpoint(payload: CreatorCreate, db: DbSession):
             status_code=status.HTTP_409_CONFLICT,
             detail="该平台账号已经处于监控列表中",
         ) from exc
-    creator, _, _ = collect_creator(db, creator)
+    try:
+        creator, _, _ = collect_creator(db, creator)
+    except CollectorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"账号已添加，但首次真实采集失败：{exc}",
+        ) from exc
     return creator
 
 
@@ -74,7 +81,13 @@ def get_creator_endpoint(creator_id: int, db: DbSession):
 
 @router.patch("/{creator_id}", response_model=CreatorRead)
 def update_creator_endpoint(creator_id: int, payload: CreatorUpdate, db: DbSession):
-    return update_creator(db, require_creator(db, creator_id), payload)
+    try:
+        return update_creator(db, require_creator(db, creator_id), payload)
+    except CollectorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.delete("/{creator_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -84,7 +97,13 @@ def delete_creator_endpoint(creator_id: int, db: DbSession) -> None:
 
 @router.post("/{creator_id}/collect", response_model=CollectionResult)
 def collect_creator_endpoint(creator_id: int, db: DbSession):
-    creator, snapshot, run = collect_creator(db, require_creator(db, creator_id))
+    try:
+        creator, snapshot, run = collect_creator(db, require_creator(db, creator_id))
+    except CollectorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"真实采集失败：{exc}",
+        ) from exc
     return CollectionResult(creator=creator, snapshot=snapshot, run=run)
 
 

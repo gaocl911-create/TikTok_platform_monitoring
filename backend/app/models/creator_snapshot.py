@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -19,6 +19,8 @@ class CreatorSnapshot(Base):
     following_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     total_like_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     content_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    collector_type: Mapped[str] = mapped_column(String(32), default="mock", nullable=False)
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="mock", nullable=False)
     captured_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     creator = relationship("CreatorAccount", back_populates="snapshots")

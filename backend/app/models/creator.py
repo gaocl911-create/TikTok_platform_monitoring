@@ -45,6 +45,19 @@ class CreatorAccount(TimestampMixin, Base):
         default="active",
         nullable=False,
     )
+    collector_type: Mapped[str] = mapped_column(String(32), default="mock", nullable=False)
+    collector_version: Mapped[str | None] = mapped_column(String(64))
+    data_quality_status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        nullable=False,
+    )
+    last_content_status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        nullable=False,
+    )
+    last_collection_error: Mapped[str | None] = mapped_column(Text)
 
     follower_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     following_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
@@ -62,6 +75,16 @@ class CreatorAccount(TimestampMixin, Base):
     )
     collection_runs = relationship(
         "CollectionRun",
+        back_populates="creator",
+        cascade="all, delete-orphan",
+    )
+    posts = relationship(
+        "ContentPost",
+        back_populates="creator",
+        cascade="all, delete-orphan",
+    )
+    alerts = relationship(
+        "Alert",
         back_populates="creator",
         cascade="all, delete-orphan",
     )

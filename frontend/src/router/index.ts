@@ -27,6 +27,18 @@ const router = createRouter({
           component: () => import('../views/CreatorDetailView.vue'),
           meta: { title: '账号详情' },
         },
+        {
+          path: 'feed',
+          name: 'feed',
+          component: () => import('../views/FeedView.vue'),
+          meta: { title: '内容动态' },
+        },
+        {
+          path: 'alerts',
+          name: 'alerts',
+          component: () => import('../views/AlertsView.vue'),
+          meta: { title: '预警中心' },
+        },
       ],
     },
   ],

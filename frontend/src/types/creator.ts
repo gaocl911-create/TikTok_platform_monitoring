@@ -1,6 +1,9 @@
 export type Platform = 'douyin' | 'xiaohongshu'
 export type Priority = 'high' | 'normal' | 'low'
 export type MonitoringStatus = 'active' | 'paused'
+export type CollectorType = 'mock' | 'douyin_public_web'
+export type DataQualityStatus = 'pending' | 'mock' | 'verified' | 'partial' | 'failed'
+export type ContentCollectionStatus = 'pending' | 'success' | 'unavailable' | 'failed'
 
 export interface Creator {
   id: number
@@ -17,6 +20,11 @@ export interface Creator {
   priority: Priority
   monitor_interval_minutes: number
   monitoring_status: MonitoringStatus
+  collector_type: CollectorType
+  collector_version: string | null
+  data_quality_status: DataQualityStatus
+  last_content_status: ContentCollectionStatus
+  last_collection_error: string | null
   follower_count: number
   following_count: number
   total_like_count: number
@@ -39,6 +47,7 @@ export interface CreatorPayload {
   tags: string[]
   priority: Priority
   monitor_interval_minutes: number
+  collector_type: CollectorType
 }
 
 export interface CreatorListResponse {
@@ -55,6 +64,8 @@ export interface CreatorSnapshot {
   following_count: number
   total_like_count: number
   content_count: number
+  collector_type: CollectorType
+  data_quality_status: DataQualityStatus
   captured_at: string
 }
 
@@ -66,7 +77,7 @@ export interface CollectionRun {
   started_at: string
   finished_at: string | null
   error_message: string | null
-  result_summary: Record<string, number> | null
+  result_summary: Record<string, number | string | string[]> | null
 }
 
 export interface CollectionResult {

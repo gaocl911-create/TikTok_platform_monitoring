@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     redis_port: int = 16379
     redis_db: int = 0
     cors_origins: str = "http://localhost:5174,http://127.0.0.1:5174"
+    alert_webhook_url: str | None = None
+    alert_webhook_timeout_seconds: int = 5
+    douyin_browser_path: str | None = None
+    douyin_render_timeout_seconds: int = 45
+    douyin_virtual_time_budget_ms: int = 15_000
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

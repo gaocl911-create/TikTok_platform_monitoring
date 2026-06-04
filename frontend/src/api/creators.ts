@@ -5,6 +5,7 @@ import type {
   CreatorListResponse,
   CreatorPayload,
   CreatorSnapshot,
+  CollectorType,
   MonitoringStatus,
   Platform,
   Priority,
@@ -28,6 +29,7 @@ export interface CreatorUpdatePayload {
   priority?: Priority
   monitor_interval_minutes?: number
   monitoring_status?: MonitoringStatus
+  collector_type?: CollectorType
 }
 
 export const creatorApi = {
@@ -42,7 +44,7 @@ export const creatorApi = {
   },
 
   async create(payload: CreatorPayload) {
-    const { data } = await apiClient.post<Creator>('/creators', payload)
+    const { data } = await apiClient.post<Creator>('/creators', payload, { timeout: 60_000 })
     return data
   },
 
@@ -56,7 +58,9 @@ export const creatorApi = {
   },
 
   async collect(id: number) {
-    const { data } = await apiClient.post<CollectionResult>(`/creators/${id}/collect`)
+    const { data } = await apiClient.post<CollectionResult>(`/creators/${id}/collect`, undefined, {
+      timeout: 60_000,
+    })
     return data
   },
 

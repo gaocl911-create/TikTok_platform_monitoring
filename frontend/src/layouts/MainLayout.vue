@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DataAnalysis, Monitor, Setting } from '@element-plus/icons-vue'
+import { Bell, DataAnalysis, Monitor, Setting, VideoPlay } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -19,19 +19,27 @@ const title = computed(() => route.meta.title || '创作者监测')
       </RouterLink>
 
       <nav aria-label="主导航">
-        <RouterLink to="/" exact-active-class="active">
+        <RouterLink to="/" exact-active-class="active" aria-label="监测总览">
           <el-icon><DataAnalysis /></el-icon>
           <span>监测总览</span>
         </RouterLink>
-        <RouterLink to="/creators" active-class="active">
+        <RouterLink to="/creators" active-class="active" aria-label="监控账号">
           <el-icon><Monitor /></el-icon>
           <span>监控账号</span>
+        </RouterLink>
+        <RouterLink to="/feed" active-class="active" aria-label="内容动态">
+          <el-icon><VideoPlay /></el-icon>
+          <span>内容动态</span>
+        </RouterLink>
+        <RouterLink to="/alerts" active-class="active" aria-label="预警中心">
+          <el-icon><Bell /></el-icon>
+          <span>预警中心</span>
         </RouterLink>
       </nav>
 
       <div class="sidebar-footer">
         <el-icon><Setting /></el-icon>
-        <span>Mock 数据模式</span>
+        <span>数据来源可追踪</span>
       </div>
     </aside>
 
@@ -217,11 +225,20 @@ main {
   }
 
   nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(100%, 390px);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   nav a {
+    min-width: 0;
     justify-content: center;
+    gap: 0;
+    padding: 3px 0;
+    font-size: 10px;
+  }
+
+  nav a span {
+    display: none;
   }
 
   .topbar {
@@ -239,4 +256,5 @@ main {
     padding: 16px;
   }
 }
+
 </style>

@@ -25,9 +25,18 @@ const form = reactive<CreatorPayload>({
   tags: [],
   priority: 'normal',
   monitor_interval_minutes: 60,
+  collector_type: 'douyin_public_web',
 })
 
 const isEditing = computed(() => Boolean(props.creator))
+const collectorOptions = computed(() => [
+  {
+    label: '真实公开数据',
+    value: 'douyin_public_web',
+    disabled: form.platform !== 'douyin',
+  },
+  { label: '模拟数据', value: 'mock' },
+])
 const rules: FormRules<CreatorPayload> = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   platform_account_id: [{ required: true, message: '请输入平台账号 ID', trigger: 'blur' }],
@@ -51,10 +60,20 @@ watch(
       tags: creator?.tags || [],
       priority: creator?.priority || 'normal',
       monitor_interval_minutes: creator?.monitor_interval_minutes || 60,
+      collector_type: creator?.collector_type || 'douyin_public_web',
     })
     formRef.value?.clearValidate()
   },
   { immediate: true },
+)
+
+watch(
+  () => form.platform,
+  (platform) => {
+    if (platform !== 'douyin' && form.collector_type === 'douyin_public_web') {
+      form.collector_type = 'mock'
+    }
+  },
 )
 
 async function handleSubmit() {
@@ -91,6 +110,17 @@ async function handleSubmit() {
           </el-select>
         </el-form-item>
       </div>
+
+      <el-form-item label="数据来源" prop="collector_type">
+        <el-segmented v-model="form.collector_type" :options="collectorOptions" />
+        <p class="source-hint">
+          {{
+            form.collector_type === 'douyin_public_web'
+              ? '通过标准浏览器读取公开主页；无法取得的内容会明确标记，不会使用模拟数据补全。'
+              : '用于开发和演示，会生成模拟账号指标与作品。'
+          }}
+        </p>
+      </el-form-item>
 
       <div class="form-grid">
         <el-form-item label="账号昵称" prop="nickname">
@@ -155,6 +185,13 @@ async function handleSubmit() {
 :deep(.el-segmented),
 :deep(.el-select) {
   width: 100%;
+}
+
+.source-hint {
+  margin: 7px 0 0;
+  color: #77808c;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 @media (max-width: 620px) {

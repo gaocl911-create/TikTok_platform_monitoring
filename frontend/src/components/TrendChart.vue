@@ -8,6 +8,7 @@ import { computed } from 'vue'
 import VChart from 'vue-echarts'
 
 import type { CreatorSnapshot } from '../types/creator'
+import { formatApiTime } from '../utils/datetime'
 
 use([CanvasRenderer, GridComponent, LineChart, TooltipComponent])
 
@@ -26,12 +27,7 @@ const option = computed<EChartsOption>(() => ({
   xAxis: {
     type: 'category',
     boundaryGap: false,
-    data: props.snapshots.map((snapshot) =>
-      new Date(snapshot.captured_at).toLocaleTimeString('zh-CN', {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-    ),
+    data: props.snapshots.map((snapshot) => formatApiTime(snapshot.captured_at)),
     axisLine: { lineStyle: { color: '#dfe4ea' } },
     axisLabel: { color: '#77808c', fontSize: 11 },
   },

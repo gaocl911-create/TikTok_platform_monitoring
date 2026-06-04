@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 
 import { useCreatorStore } from '../stores/creators'
 import type { Creator } from '../types/creator'
+import { formatApiDateTime } from '../utils/datetime'
 
 const store = useCreatorStore()
 const router = useRouter()
@@ -34,7 +35,7 @@ function formatNumber(value: number) {
 
 function formatTime(value: string | null | undefined) {
   if (!value) return '暂无采集'
-  return new Date(value).toLocaleString('zh-CN', {
+  return formatApiDateTime(value, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

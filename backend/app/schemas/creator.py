@@ -1,11 +1,14 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.base import UtcResponseModel
 
 Platform = Literal["douyin", "xiaohongshu"]
 Priority = Literal["high", "normal", "low"]
 MonitoringStatus = Literal["active", "paused"]
+CollectorType = Literal["mock", "douyin_public_web"]
 
 
 class CreatorCreate(BaseModel):
@@ -19,6 +22,13 @@ class CreatorCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     priority: Priority = "normal"
     monitor_interval_minutes: int = Field(default=60, ge=5, le=10080)
+    collector_type: CollectorType = "mock"
+
+    @model_validator(mode="after")
+    def validate_collector_type(self) -> Self:
+        if self.collector_type == "douyin_public_web" and self.platform != "douyin":
+            raise ValueError("抖音公开主页采集器只能用于抖音账号")
+        return self
 
 
 class CreatorUpdate(BaseModel):
@@ -31,9 +41,10 @@ class CreatorUpdate(BaseModel):
     priority: Priority | None = None
     monitor_interval_minutes: int | None = Field(default=None, ge=5, le=10080)
     monitoring_status: MonitoringStatus | None = None
+    collector_type: CollectorType | None = None
 
 
-class CreatorRead(BaseModel):
+class CreatorRead(UtcResponseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -50,6 +61,11 @@ class CreatorRead(BaseModel):
     priority: str
     monitor_interval_minutes: int
     monitoring_status: str
+    collector_type: str
+    collector_version: str | None
+    data_quality_status: str
+    last_content_status: str
+    last_collection_error: str | None
     follower_count: int
     following_count: int
     total_like_count: int
@@ -68,7 +84,7 @@ class CreatorListResponse(BaseModel):
     page_size: int
 
 
-class CreatorSnapshotRead(BaseModel):
+class CreatorSnapshotRead(UtcResponseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -77,10 +93,12 @@ class CreatorSnapshotRead(BaseModel):
     following_count: int
     total_like_count: int
     content_count: int
+    collector_type: str
+    data_quality_status: str
     captured_at: datetime
 
 
-class CollectionRunRead(BaseModel):
+class CollectionRunRead(UtcResponseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

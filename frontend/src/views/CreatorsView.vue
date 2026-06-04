@@ -7,6 +7,8 @@ import { useRouter } from 'vue-router'
 import CreatorFormDialog from '../components/CreatorFormDialog.vue'
 import { useCreatorStore } from '../stores/creators'
 import type { Creator, CreatorPayload, MonitoringStatus, Platform } from '../types/creator'
+import { collectorLabel, qualityLabel } from '../utils/collector'
+import { formatApiDateTime } from '../utils/datetime'
 
 const store = useCreatorStore()
 const router = useRouter()
@@ -34,7 +36,7 @@ function formatNumber(value: number) {
 
 function formatTime(value: string | null) {
   if (!value) return '尚未采集'
-  return new Date(value).toLocaleString('zh-CN', {
+  return formatApiDateTime(value, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -67,11 +69,16 @@ async function handleSubmit(payload: CreatorPayload) {
         tags: payload.tags,
         priority: payload.priority,
         monitor_interval_minutes: payload.monitor_interval_minutes,
+        collector_type: payload.collector_type,
       })
       ElMessage.success('账号配置已更新')
     } else {
-      await store.createCreator(payload)
-      ElMessage.success('账号已添加，并完成首次采集')
+      const created = await store.createCreator(payload)
+      if (created.data_quality_status === 'partial') {
+        ElMessage.warning('账号已添加，真实账号指标已采集；作品明细暂不可用')
+      } else {
+        ElMessage.success('账号已添加，并完成首次采集')
+      }
     }
     dialogVisible.value = false
     await load()
@@ -85,7 +92,11 @@ async function handleCollect(creator: Creator) {
   try {
     const result = await store.collectCreator(creator.id)
     const delta = result.run.result_summary?.follower_delta || 0
-    ElMessage.success(`采集完成，粉丝变化 +${delta}`)
+    if (result.run.status === 'partial') {
+      ElMessage.warning('真实账号指标已更新，作品明细暂不可用')
+    } else {
+      ElMessage.success(`采集完成，粉丝变化 +${delta}`)
+    }
     await load()
   } finally {
     collectingId.value = null
@@ -178,6 +189,16 @@ onMounted(load)
           <template #default="{ row }">{{ formatNumber(row.total_like_count) }}</template>
         </el-table-column>
         <el-table-column label="作品" width="90" align="right" prop="content_count" />
+        <el-table-column label="数据来源" width="150">
+          <template #default="{ row }">
+            <div class="source-cell">
+              <strong>{{ collectorLabel(row.collector_type) }}</strong>
+              <span class="quality-badge" :class="row.data_quality_status">
+                {{ qualityLabel(row.data_quality_status) }}
+              </span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="采集设置" width="160">
           <template #default="{ row }">
             <div class="collection-setting">
@@ -260,6 +281,12 @@ onMounted(load)
           </div>
           <span class="status" :class="creator.monitoring_status">
             {{ creator.monitoring_status === 'active' ? '监控中' : '已暂停' }}
+          </span>
+        </div>
+        <div class="mobile-source-row">
+          <span>{{ collectorLabel(creator.collector_type) }}</span>
+          <span class="quality-badge" :class="creator.data_quality_status">
+            {{ qualityLabel(creator.data_quality_status) }}
           </span>
         </div>
         <dl>

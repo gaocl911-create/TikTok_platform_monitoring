@@ -4,12 +4,14 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.collectors import MockCollector
+from app.collectors import CollectorConfigurationError, get_collector
 from app.models.base import utc_now
 from app.models.collection_run import CollectionRun
 from app.models.creator import CreatorAccount
 from app.models.creator_snapshot import CreatorSnapshot
 from app.schemas.creator import CreatorCreate, CreatorUpdate
+from app.services.alerts import dispatch_alert_notifications, evaluate_content_alerts
+from app.services.posts import sync_content_posts
 
 
 class CreatorAlreadyExistsError(Exception):
@@ -17,9 +19,11 @@ class CreatorAlreadyExistsError(Exception):
 
 
 def create_creator(db: Session, payload: CreatorCreate) -> CreatorAccount:
+    data_quality_status = "mock" if payload.collector_type == "mock" else "pending"
     creator = CreatorAccount(
         **payload.model_dump(),
         monitoring_status="active",
+        data_quality_status=data_quality_status,
         next_collect_at=utc_now(),
     )
     db.add(creator)
@@ -73,8 +77,33 @@ def list_creators(
 
 
 def update_creator(db: Session, creator: CreatorAccount, payload: CreatorUpdate) -> CreatorAccount:
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    collector_type = updates.get("collector_type")
+    previous_collector_type = creator.collector_type
+    if collector_type == "douyin_public_web" and creator.platform != "douyin":
+        raise CollectorConfigurationError("抖音公开主页采集器只能用于抖音账号")
+
+    for field, value in updates.items():
         setattr(creator, field, value)
+
+    if collector_type is not None and collector_type != previous_collector_type:
+        creator.collector_version = None
+        creator.data_quality_status = "mock" if collector_type == "mock" else "pending"
+        creator.last_content_status = "pending"
+        creator.last_collection_error = None
+        creator.follower_count = 0
+        creator.following_count = 0
+        creator.total_like_count = 0
+        creator.content_count = 0
+        creator.last_collected_at = None
+        creator.consecutive_failures = 0
+        creator.next_collect_at = utc_now()
+        if previous_collector_type == "mock" and collector_type != "mock":
+            for post in list(creator.posts):
+                if post.data_source == "mock":
+                    db.delete(post)
+            for alert in list(creator.alerts):
+                db.delete(alert)
 
     if creator.monitoring_status == "active" and creator.next_collect_at is None:
         creator.next_collect_at = utc_now()
@@ -104,12 +133,14 @@ def collect_creator(db: Session, creator: CreatorAccount):
         "content_count": creator.content_count,
     }
 
+    collector = None
     try:
-        profile = MockCollector().fetch_creator_profile(creator)
+        collector = get_collector(creator)
+        profile = collector.fetch_creator_profile(creator)
         creator.nickname = profile.nickname
-        creator.avatar_url = profile.avatar_url
+        creator.avatar_url = profile.avatar_url or creator.avatar_url
         creator.bio = profile.bio
-        creator.verified_info = profile.verified_info
+        creator.verified_info = profile.verified_info or creator.verified_info
         creator.location = profile.location
         creator.follower_count = profile.follower_count
         creator.following_count = profile.following_count
@@ -125,18 +156,53 @@ def collect_creator(db: Session, creator: CreatorAccount):
             following_count=creator.following_count,
             total_like_count=creator.total_like_count,
             content_count=creator.content_count,
+            collector_type=collector.collector_type,
+            data_quality_status="pending",
             captured_at=started_at,
         )
         db.add(snapshot)
 
-        run.status = "success"
+        content_profiles = collector.fetch_content_posts(creator)
+        content_status = collector.content_status
+        warnings = list(collector.warnings)
+        new_posts, content_snapshot_results = sync_content_posts(
+            db,
+            creator,
+            content_profiles,
+            captured_at=started_at,
+        )
+        alerts = evaluate_content_alerts(db, creator, new_posts, content_snapshot_results)
+
+        if collector.collector_type == "mock":
+            data_quality_status = "mock"
+        elif content_status == "success":
+            data_quality_status = "verified"
+        else:
+            data_quality_status = "partial"
+
+        creator.collector_version = collector.version
+        creator.data_quality_status = data_quality_status
+        creator.last_content_status = content_status
+        creator.last_collection_error = "；".join(warnings) or None
+        snapshot.data_quality_status = data_quality_status
+
+        run.status = "partial" if data_quality_status == "partial" else "success"
         run.finished_at = utc_now()
         run.result_summary = {
+            "collector_type": collector.collector_type,
+            "collector_version": collector.version,
+            "data_quality_status": data_quality_status,
+            "content_status": content_status,
+            "warnings": warnings,
             "follower_delta": creator.follower_count - before["follower_count"],
             "like_delta": creator.total_like_count - before["total_like_count"],
             "content_delta": creator.content_count - before["content_count"],
+            "new_content_count": len(new_posts),
+            "content_snapshot_count": len(content_snapshot_results),
+            "alert_count": len(alerts),
         }
         db.commit()
+        dispatch_alert_notifications(db, alerts)
         db.refresh(creator)
         db.refresh(snapshot)
         db.refresh(run)
@@ -147,12 +213,21 @@ def collect_creator(db: Session, creator: CreatorAccount):
         if creator is not None:
             creator.consecutive_failures += 1
             creator.next_collect_at = utc_now() + timedelta(minutes=15)
+            creator.collector_version = getattr(collector, "version", None)
+            creator.data_quality_status = "failed"
+            creator.last_content_status = "failed"
+            creator.last_collection_error = str(exc)
         failed_run = CollectionRun(
             creator_id=run.creator_id,
             status="failed",
             started_at=started_at,
             finished_at=utc_now(),
             error_message=str(exc),
+            result_summary={
+                "collector_type": creator.collector_type if creator is not None else "unknown",
+                "data_quality_status": "failed",
+                "content_status": "failed",
+            },
         )
         db.add(failed_run)
         db.commit()

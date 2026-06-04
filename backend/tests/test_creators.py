@@ -18,6 +18,8 @@ def test_creator_monitoring_workflow(client: TestClient) -> None:
     creator = create_response.json()
     assert creator["nickname"] == "示例创作者"
     assert creator["follower_count"] > 0
+    assert creator["last_collected_at"].endswith("Z")
+    assert creator["next_collect_at"].endswith("Z")
 
     duplicate_response = client.post("/api/v1/creators", json=CREATOR_PAYLOAD)
     assert duplicate_response.status_code == 409
@@ -35,6 +37,7 @@ def test_creator_monitoring_workflow(client: TestClient) -> None:
     snapshots_response = client.get(f"/api/v1/creators/{creator['id']}/snapshots")
     assert snapshots_response.status_code == 200
     assert len(snapshots_response.json()) == 2
+    assert snapshots_response.json()[-1]["captured_at"].endswith("Z")
 
     pause_response = client.patch(
         f"/api/v1/creators/{creator['id']}",
