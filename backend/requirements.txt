@@ -1,0 +1,8 @@
+alembic==1.16.1
+celery[redis]==5.5.3
+cryptography==48.0.0
+fastapi==0.115.12
+pydantic-settings==2.9.1
+pymysql==1.1.1
+sqlalchemy==2.0.41
+uvicorn[standard]==0.34.3
