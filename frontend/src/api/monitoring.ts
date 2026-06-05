@@ -1,5 +1,6 @@
 import apiClient from './client'
 import type { Platform } from '../types/creator'
+import type { CollectionRunListResponse, CollectorType } from '../types/creator'
 import type {
   AlertListResponse,
   AlertRecord,
@@ -24,6 +25,14 @@ export interface AlertQuery {
   page_size?: number
   status?: AlertStatus | ''
   alert_type?: AlertType | ''
+}
+
+export interface CollectionRunQuery {
+  page?: number
+  page_size?: number
+  creator_id?: number
+  status?: '' | 'success' | 'partial' | 'failed' | 'skipped'
+  collector_type?: '' | CollectorType
 }
 
 export const monitoringApi = {
@@ -64,6 +73,11 @@ export const monitoringApi = {
 
   async updateAlertRule(id: number, payload: Partial<Pick<AlertRule, 'conditions_json' | 'is_enabled'>>) {
     const { data } = await apiClient.patch<AlertRule>(`/alert-rules/${id}`, payload)
+    return data
+  },
+
+  async listCollectionRuns(params: CollectionRunQuery = {}) {
+    const { data } = await apiClient.get<CollectionRunListResponse>('/collection-runs', { params })
     return data
   },
 }

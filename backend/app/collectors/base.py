@@ -9,11 +9,15 @@ class CollectorError(RuntimeError):
     """Base error for explicit collector failures."""
 
 
+class CollectorTransientError(CollectorError):
+    """Raised for temporary failures that may succeed when retried."""
+
+
 class CollectorConfigurationError(CollectorError):
     """Raised when an account is assigned to an unsupported collector."""
 
 
-class CollectorRenderError(CollectorError):
+class CollectorRenderError(CollectorTransientError):
     """Raised when a public page cannot be rendered by the browser."""
 
 
@@ -46,11 +50,12 @@ class ContentProfile:
     content_type: str
     content_url: str
     cover_url: str | None
-    published_at: datetime
+    published_at: datetime | None
     like_count: int
     comment_count: int
     collect_count: int
     share_count: int
+    metrics_status: str = "success"
     raw_data: dict | None = None
 
 

@@ -91,10 +91,12 @@ async function handleCollect(creator: Creator) {
   collectingId.value = creator.id
   try {
     const result = await store.collectCreator(creator.id)
-    const delta = result.run.result_summary?.follower_delta || 0
-    if (result.run.status === 'partial') {
+    if (!('run' in result)) {
+      ElMessage.warning('首次采集失败，已加入自动重试队列')
+    } else if (result.run.status === 'partial') {
       ElMessage.warning('真实账号指标已更新，作品明细暂不可用')
     } else {
+      const delta = Number(result.run.result_summary?.follower_delta || 0)
       ElMessage.success(`采集完成，粉丝变化 +${delta}`)
     }
     await load()

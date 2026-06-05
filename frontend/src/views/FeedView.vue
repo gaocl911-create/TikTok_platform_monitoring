@@ -26,13 +26,18 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 }
 
-function formatTime(value: string) {
+function formatTime(value: string | null) {
+  if (!value) return '公开页面未提供'
   return formatApiDateTime(value, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function formatMetric(post: ContentPost, value: number) {
+  return post.metrics_status === 'success' ? formatNumber(value) : '--'
 }
 
 async function load() {
@@ -105,10 +110,10 @@ onMounted(load)
           <h3>{{ post.title }}</h3>
           <p>{{ post.summary || '暂无公开摘要' }}</p>
           <dl class="engagement-row">
-            <div><dt>点赞</dt><dd>{{ formatNumber(post.latest_like_count) }}</dd></div>
-            <div><dt>评论</dt><dd>{{ formatNumber(post.latest_comment_count) }}</dd></div>
-            <div><dt>收藏</dt><dd>{{ formatNumber(post.latest_collect_count) }}</dd></div>
-            <div><dt>分享</dt><dd>{{ formatNumber(post.latest_share_count) }}</dd></div>
+            <div><dt>点赞</dt><dd>{{ formatMetric(post, post.latest_like_count) }}</dd></div>
+            <div><dt>评论</dt><dd>{{ formatMetric(post, post.latest_comment_count) }}</dd></div>
+            <div><dt>收藏</dt><dd>{{ formatMetric(post, post.latest_collect_count) }}</dd></div>
+            <div><dt>分享</dt><dd>{{ formatMetric(post, post.latest_share_count) }}</dd></div>
           </dl>
         </div>
         <div class="feed-actions">

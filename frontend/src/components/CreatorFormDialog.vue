@@ -3,6 +3,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { computed, reactive, ref, watch } from 'vue'
 
 import type { Creator, CreatorPayload } from '../types/creator'
+import { isValidProfileUrl, normalizeProfileUrl } from '../utils/profileUrl'
 
 const props = defineProps<{
   modelValue: boolean
@@ -41,7 +42,16 @@ const rules: FormRules<CreatorPayload> = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   platform_account_id: [{ required: true, message: '请输入平台账号 ID', trigger: 'blur' }],
   nickname: [{ required: true, message: '请输入账号昵称', trigger: 'blur' }],
-  profile_url: [{ required: true, message: '请输入账号主页链接', trigger: 'blur' }],
+  profile_url: [
+    { required: true, message: '请输入账号主页链接或平台分享文案', trigger: 'blur' },
+    {
+      validator: (_rule, value: string, callback) => {
+        if (isValidProfileUrl(value)) callback()
+        else callback(new Error('请输入有效且不含空格的 HTTP(S) 主页链接'))
+      },
+      trigger: 'blur',
+    },
+  ],
   monitor_interval_minutes: [
     { required: true, message: '请设置采集间隔', trigger: 'change' },
   ],
@@ -77,8 +87,13 @@ watch(
 )
 
 async function handleSubmit() {
+  form.profile_url = normalizeProfileUrl(form.profile_url)
   await formRef.value?.validate()
   emit('submit', { ...form, tags: [...form.tags] })
+}
+
+function normalizeUrlField() {
+  form.profile_url = normalizeProfileUrl(form.profile_url)
 }
 </script>
 
@@ -136,7 +151,11 @@ async function handleSubmit() {
       </div>
 
       <el-form-item label="账号主页链接" prop="profile_url">
-        <el-input v-model="form.profile_url" placeholder="https://..." />
+        <el-input
+          v-model="form.profile_url"
+          placeholder="可直接粘贴平台分享文案或 https://..."
+          @blur="normalizeUrlField"
+        />
       </el-form-item>
 
       <div class="form-grid">

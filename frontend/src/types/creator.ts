@@ -74,14 +74,39 @@ export interface CollectionRun {
   creator_id: number
   task_type: string
   status: string
+  trigger_source: 'initial' | 'manual' | 'scheduled'
+  attempt: number
+  collector_type: CollectorType | null
+  error_type: string | null
+  duration_ms: number | null
   started_at: string
   finished_at: string | null
   error_message: string | null
-  result_summary: Record<string, number | string | string[]> | null
+  result_summary: Record<string, unknown> | null
+  creator: {
+    id: number
+    nickname: string
+    platform: Platform
+  }
 }
 
 export interface CollectionResult {
   creator: Creator
   snapshot: CreatorSnapshot
   run: CollectionRun
+}
+
+export interface CollectionRetryQueued {
+  creator_id: number
+  task_id: string
+  status: 'queued'
+  retry_after_seconds: number
+  message: string
+}
+
+export interface CollectionRunListResponse {
+  items: CollectionRun[]
+  total: number
+  page: number
+  page_size: number
 }

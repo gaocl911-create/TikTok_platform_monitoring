@@ -61,7 +61,11 @@ def test_content_discovery_snapshot_and_alert_workflow(client: TestClient) -> No
     rules_response = client.get("/api/v1/alert-rules")
     assert rules_response.status_code == 200
     rules = rules_response.json()
-    assert {rule["alert_type"] for rule in rules} == {"new_content", "content_like_growth"}
+    assert {rule["alert_type"] for rule in rules} == {
+        "new_content",
+        "content_like_growth",
+        "collection_failure",
+    }
 
     growth_rule = next(rule for rule in rules if rule["alert_type"] == "content_like_growth")
     update_rule_response = client.patch(

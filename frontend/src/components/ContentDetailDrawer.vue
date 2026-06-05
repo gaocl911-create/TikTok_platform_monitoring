@@ -18,7 +18,13 @@ const likeDelta = computed(() => {
 })
 
 function formatNumber(value: number) {
+  if (props.post?.metrics_status !== 'success') return '--'
   return value.toLocaleString('zh-CN')
+}
+
+function formatDelta() {
+  if (props.post?.metrics_status !== 'success') return '--'
+  return `+${likeDelta.value.toLocaleString('zh-CN')}`
 }
 
 function formatTime(value: string) {
@@ -49,7 +55,7 @@ function formatTime(value: string) {
           <div><span>点赞</span><strong>{{ formatNumber(post.latest_like_count) }}</strong></div>
           <div><span>评论</span><strong>{{ formatNumber(post.latest_comment_count) }}</strong></div>
           <div><span>收藏</span><strong>{{ formatNumber(post.latest_collect_count) }}</strong></div>
-          <div><span>最近增赞</span><strong>+{{ formatNumber(likeDelta) }}</strong></div>
+          <div><span>最近增赞</span><strong>{{ formatDelta() }}</strong></div>
         </section>
 
         <el-button :icon="Link" tag="a" :href="post.content_url" target="_blank">

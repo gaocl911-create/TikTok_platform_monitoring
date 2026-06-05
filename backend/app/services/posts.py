@@ -17,6 +17,8 @@ def sync_content_posts(
     captured_at: datetime,
 ) -> tuple[list[ContentPost], list[tuple[ContentPost, ContentSnapshot, int]]]:
     platform_ids = [profile.platform_content_id for profile in profiles]
+    if not platform_ids:
+        return [], []
     query = select(ContentPost).where(
         ContentPost.creator_id == creator.id,
         ContentPost.platform_content_id.in_(platform_ids),
@@ -40,6 +42,7 @@ def sync_content_posts(
                 published_at=profile.published_at,
                 first_discovered_at=captured_at,
                 data_source=creator.collector_type,
+                metrics_status=profile.metrics_status,
                 raw_data_json=profile.raw_data,
             )
             db.add(post)
@@ -52,8 +55,13 @@ def sync_content_posts(
             post.content_url = profile.content_url
             post.cover_url = profile.cover_url
             post.data_source = creator.collector_type
+            post.metrics_status = profile.metrics_status
             post.raw_data_json = profile.raw_data
+            if profile.published_at is not None:
+                post.published_at = profile.published_at
 
+        if profile.metrics_status != "success":
+            continue
         post.latest_like_count = max(previous_likes, profile.like_count)
         post.latest_comment_count = max(post.latest_comment_count, profile.comment_count)
         post.latest_collect_count = max(post.latest_collect_count, profile.collect_count)

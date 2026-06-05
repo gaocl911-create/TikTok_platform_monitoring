@@ -39,7 +39,7 @@ class ContentPost(TimestampMixin, Base):
     content_type: Mapped[str] = mapped_column(String(32), default="video", nullable=False)
     content_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     cover_url: Mapped[str | None] = mapped_column(String(1000))
-    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     first_discovered_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     latest_like_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     latest_comment_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
@@ -47,6 +47,7 @@ class ContentPost(TimestampMixin, Base):
     latest_share_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
     data_source: Mapped[str] = mapped_column(String(32), default="mock", nullable=False)
+    metrics_status: Mapped[str] = mapped_column(String(20), default="success", nullable=False)
     raw_data_json: Mapped[dict | None] = mapped_column(JSON)
 
     creator = relationship("CreatorAccount", back_populates="posts")

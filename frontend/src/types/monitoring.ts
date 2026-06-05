@@ -15,7 +15,7 @@ export interface ContentPost {
   content_type: string
   content_url: string
   cover_url: string | null
-  published_at: string
+  published_at: string | null
   first_discovered_at: string
   latest_like_count: number
   latest_comment_count: number
@@ -23,6 +23,7 @@ export interface ContentPost {
   latest_share_count: number
   status: string
   data_source: 'mock' | 'douyin_public_web'
+  metrics_status: 'success' | 'unavailable'
   creator: ContentCreator
 }
 
@@ -43,7 +44,7 @@ export interface ContentSnapshot {
   captured_at: string
 }
 
-export type AlertType = 'new_content' | 'content_like_growth'
+export type AlertType = 'new_content' | 'content_like_growth' | 'collection_failure'
 export type AlertStatus = 'unread' | 'read'
 
 export interface AlertRecord {

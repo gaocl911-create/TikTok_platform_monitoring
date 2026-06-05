@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, DataAnalysis, Monitor, Setting, VideoPlay } from '@element-plus/icons-vue'
+import { Bell, DataAnalysis, Monitor, Setting, Timer, VideoPlay } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -34,6 +34,10 @@ const title = computed(() => route.meta.title || '创作者监测')
         <RouterLink to="/alerts" active-class="active" aria-label="预警中心">
           <el-icon><Bell /></el-icon>
           <span>预警中心</span>
+        </RouterLink>
+        <RouterLink to="/runs" active-class="active" aria-label="采集运行">
+          <el-icon><Timer /></el-icon>
+          <span>采集运行</span>
         </RouterLink>
       </nav>
 
@@ -226,7 +230,7 @@ main {
 
   nav {
     width: min(100%, 390px);
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   nav a {

@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.base import UtcResponseModel
+from app.utils.profile_urls import normalize_profile_url
 
 Platform = Literal["douyin", "xiaohongshu"]
 Priority = Literal["high", "normal", "low"]
@@ -24,6 +25,11 @@ class CreatorCreate(BaseModel):
     monitor_interval_minutes: int = Field(default=60, ge=5, le=10080)
     collector_type: CollectorType = "mock"
 
+    @field_validator("profile_url", mode="before")
+    @classmethod
+    def normalize_profile_url_field(cls, value: str) -> str:
+        return normalize_profile_url(value)
+
     @model_validator(mode="after")
     def validate_collector_type(self) -> Self:
         if self.collector_type == "douyin_public_web" and self.platform != "douyin":
@@ -42,6 +48,11 @@ class CreatorUpdate(BaseModel):
     monitor_interval_minutes: int | None = Field(default=None, ge=5, le=10080)
     monitoring_status: MonitoringStatus | None = None
     collector_type: CollectorType | None = None
+
+    @field_validator("profile_url", mode="before")
+    @classmethod
+    def normalize_profile_url_field(cls, value: str | None) -> str | None:
+        return normalize_profile_url(value) if value is not None else None
 
 
 class CreatorRead(UtcResponseModel):
@@ -98,6 +109,14 @@ class CreatorSnapshotRead(UtcResponseModel):
     captured_at: datetime
 
 
+class CollectionRunCreatorRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nickname: str
+    platform: str
+
+
 class CollectionRunRead(UtcResponseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -105,13 +124,34 @@ class CollectionRunRead(UtcResponseModel):
     creator_id: int
     task_type: str
     status: str
+    trigger_source: str
+    attempt: int
+    collector_type: str | None
+    error_type: str | None
+    duration_ms: int | None
     started_at: datetime
     finished_at: datetime | None
     error_message: str | None
     result_summary: dict | None
+    creator: CollectionRunCreatorRead
 
 
 class CollectionResult(BaseModel):
     creator: CreatorRead
     snapshot: CreatorSnapshotRead
     run: CollectionRunRead
+
+
+class CollectionRetryQueued(BaseModel):
+    creator_id: int
+    task_id: str
+    status: Literal["queued"]
+    retry_after_seconds: int
+    message: str
+
+
+class CollectionRunListResponse(BaseModel):
+    items: list[CollectionRunRead]
+    total: int
+    page: int
+    page_size: int

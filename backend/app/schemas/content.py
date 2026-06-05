@@ -24,7 +24,7 @@ class ContentPostRead(UtcResponseModel):
     content_type: str
     content_url: str
     cover_url: str | None
-    published_at: datetime
+    published_at: datetime | None
     first_discovered_at: datetime
     latest_like_count: int
     latest_comment_count: int
@@ -32,6 +32,7 @@ class ContentPostRead(UtcResponseModel):
     latest_share_count: int
     status: str
     data_source: str
+    metrics_status: str
     creator: ContentCreatorRead
 
 

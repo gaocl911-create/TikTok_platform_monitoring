@@ -1,8 +1,20 @@
+import subprocess
+
 import pytest
 from fastapi.testclient import TestClient
 
-from app.collectors.base import CollectorRenderError, CreatorProfile
-from app.collectors.douyin_public_web import parse_compact_number, parse_douyin_profile_html
+from app.collectors.base import (
+    CollectorParseError,
+    CollectorRenderError,
+    CollectorTransientError,
+    ContentProfile,
+    CreatorProfile,
+)
+from app.collectors.douyin_public_web import (
+    parse_compact_number,
+    parse_douyin_content_html,
+    parse_douyin_profile_html,
+)
 
 REAL_CREATOR_PAYLOAD = {
     "platform": "douyin",
@@ -35,11 +47,58 @@ PROFILE_HTML = """
 </html>
 """
 
+CONTENT_HTML = """
+<html><body>
+  <div data-e2e="user-post-list">
+    <a href="/video/7512345678901234567" aria-label="账号自己的公开作品">
+      <img src="https://example.com/cover.jpg" />
+    </a>
+  </div>
+  <footer>
+    <a href="/video/7599999999999999999">热门推荐，不属于该账号</a>
+  </footer>
+</body></html>
+"""
+
 
 def test_parse_compact_number() -> None:
     assert parse_compact_number("58") == 58
     assert parse_compact_number("41.4万") == 414_000
     assert parse_compact_number("1.2亿") == 120_000_000
+
+
+def test_only_temporary_collector_errors_are_retryable() -> None:
+    assert issubclass(CollectorRenderError, CollectorTransientError)
+    assert not issubclass(CollectorParseError, CollectorTransientError)
+
+
+def test_render_timeout_terminates_edge_process_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    class TimedOutProcess:
+        pid = 12345
+        returncode = None
+
+        def communicate(self, timeout):
+            raise subprocess.TimeoutExpired(cmd="msedge", timeout=timeout)
+
+    collector = __import__(
+        "app.collectors.douyin_public_web",
+        fromlist=["DouyinPublicWebCollector"],
+    ).DouyinPublicWebCollector()
+    process = TimedOutProcess()
+    terminated: list[int] = []
+
+    monkeypatch.setattr(collector, "_resolve_browser_path", lambda: "msedge.exe")
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        collector,
+        "_terminate_process_tree",
+        lambda item: terminated.append(item.pid),
+    )
+
+    with pytest.raises(CollectorRenderError, match="渲染超时"):
+        collector._render_profile("https://v.douyin.com/example/")
+
+    assert terminated == [12345]
 
 
 def test_parse_douyin_public_profile() -> None:
@@ -52,6 +111,17 @@ def test_parse_douyin_public_profile() -> None:
     assert profile.content_count == 219
     assert profile.location == "山东"
     assert profile.bio == "分享好玩有趣的计算机知识与软件 DIY。"
+
+
+def test_parse_douyin_content_only_accepts_account_post_list() -> None:
+    posts = parse_douyin_content_html(CONTENT_HTML)
+
+    assert len(posts) == 1
+    assert posts[0].platform_content_id == "7512345678901234567"
+    assert posts[0].title == "账号自己的公开作品"
+    assert posts[0].cover_url == "https://example.com/cover.jpg"
+    assert posts[0].published_at is None
+    assert posts[0].metrics_status == "unavailable"
 
 
 def test_real_collection_partial_status_never_adds_mock_posts(
@@ -99,6 +169,63 @@ def test_real_collection_partial_status_never_adds_mock_posts(
     collect_response = client.post(f"/api/v1/creators/{creator['id']}/collect")
     assert collect_response.status_code == 200
     assert collect_response.json()["run"]["status"] == "partial"
+
+
+def test_real_public_post_without_metrics_has_no_fake_snapshot(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PartialContentCollector:
+        collector_type = "douyin_public_web"
+        version = "test-real-v2"
+        content_status = "partial"
+        warnings = ["公开作品未提供互动指标"]
+
+        def fetch_creator_profile(self, creator):
+            return CreatorProfile(
+                nickname="技术爬爬虾",
+                avatar_url=None,
+                bio="真实公开简介",
+                verified_info=None,
+                location="山东",
+                follower_count=414_000,
+                following_count=58,
+                total_like_count=2_125_000,
+                content_count=219,
+            )
+
+        def fetch_content_posts(self, creator):
+            return [
+                ContentProfile(
+                    platform_content_id="7512345678901234567",
+                    title="真实公开作品",
+                    summary=None,
+                    content_type="video",
+                    content_url="https://www.douyin.com/video/7512345678901234567",
+                    cover_url=None,
+                    published_at=None,
+                    like_count=0,
+                    comment_count=0,
+                    collect_count=0,
+                    share_count=0,
+                    metrics_status="unavailable",
+                )
+            ]
+
+    monkeypatch.setattr(
+        "app.services.creators.get_collector",
+        lambda creator: PartialContentCollector(),
+    )
+
+    response = client.post(
+        "/api/v1/creators",
+        json={**REAL_CREATOR_PAYLOAD, "platform_account_id": "public-post-test"},
+    )
+    assert response.status_code == 201
+    post = client.get("/api/v1/posts").json()["items"][0]
+    assert post["metrics_status"] == "unavailable"
+    assert post["published_at"] is None
+    assert client.get(f"/api/v1/posts/{post['id']}/snapshots").json() == []
 
 
 def test_real_collection_failure_is_recorded_without_mock_fallback(

@@ -49,3 +49,55 @@ def test_creator_monitoring_workflow(client: TestClient) -> None:
     delete_response = client.delete(f"/api/v1/creators/{creator['id']}")
     assert delete_response.status_code == 204
     assert client.get(f"/api/v1/creators/{creator['id']}").status_code == 404
+
+
+def test_profile_url_is_extracted_from_share_text(client: TestClient) -> None:
+    payload = {
+        **CREATOR_PAYLOAD,
+        "platform_account_id": "share-text-account",
+        "profile_url": "复制打开抖音 https://v.douyin.com/RPSHKjDnGoI/ 9@5.com :8pm",
+    }
+
+    response = client.post("/api/v1/creators", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["profile_url"] == "https://v.douyin.com/RPSHKjDnGoI/"
+
+
+def test_douyin_short_url_is_extracted_when_share_suffix_follows(client: TestClient) -> None:
+    payload = {
+        **CREATOR_PAYLOAD,
+        "platform_account_id": "share-suffix-account",
+        "profile_url": "https://v.douyin.com/RPSHKjDnGoI/ 9@5.com :8pm",
+    }
+
+    response = client.post("/api/v1/creators", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["profile_url"] == "https://v.douyin.com/RPSHKjDnGoI/"
+
+
+def test_regular_profile_url_with_spaces_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/creators",
+        json={
+            **CREATOR_PAYLOAD,
+            "platform_account_id": "spaced-profile-url",
+            "profile_url": "https://www.douyin.com/user/contains space",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_profile_url_with_spaces_and_no_public_url_is_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/creators",
+        json={
+            **CREATOR_PAYLOAD,
+            "platform_account_id": "invalid-profile-url",
+            "profile_url": "not a valid profile url",
+        },
+    )
+
+    assert response.status_code == 422

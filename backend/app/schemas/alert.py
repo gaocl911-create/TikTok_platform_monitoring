@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.base import UtcResponseModel
 
-AlertType = Literal["new_content", "content_like_growth"]
+AlertType = Literal["new_content", "content_like_growth", "collection_failure"]
 
 
 class AlertRuleCreate(BaseModel):

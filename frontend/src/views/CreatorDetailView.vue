@@ -55,7 +55,9 @@ async function collect() {
   collecting.value = true
   try {
     const result = await store.collectCreator(creatorId.value)
-    if (result.run.status === 'partial') {
+    if (!('run' in result)) {
+      ElMessage.warning('首次采集失败，已加入自动重试队列，可在“采集运行”查看进度')
+    } else if (result.run.status === 'partial') {
       ElMessage.warning('真实账号指标已更新，作品明细暂不可用')
     } else {
       ElMessage.success('公开数据快照已更新')

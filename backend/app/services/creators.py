@@ -10,7 +10,11 @@ from app.models.collection_run import CollectionRun
 from app.models.creator import CreatorAccount
 from app.models.creator_snapshot import CreatorSnapshot
 from app.schemas.creator import CreatorCreate, CreatorUpdate
-from app.services.alerts import dispatch_alert_notifications, evaluate_content_alerts
+from app.services.alerts import (
+    dispatch_alert_notifications,
+    evaluate_collection_failure_alert,
+    evaluate_content_alerts,
+)
 from app.services.posts import sync_content_posts
 
 
@@ -117,11 +121,24 @@ def delete_creator(db: Session, creator: CreatorAccount) -> None:
     db.commit()
 
 
-def collect_creator(db: Session, creator: CreatorAccount):
+def _duration_ms(started_at, finished_at) -> int:
+    return max(0, round((finished_at - started_at).total_seconds() * 1000))
+
+
+def collect_creator(
+    db: Session,
+    creator: CreatorAccount,
+    *,
+    trigger_source: str = "manual",
+    attempt: int = 1,
+):
     started_at = utc_now()
     run = CollectionRun(
         creator_id=creator.id,
         status="running",
+        trigger_source=trigger_source,
+        attempt=attempt,
+        collector_type=creator.collector_type,
         started_at=started_at,
     )
     db.add(run)
@@ -136,6 +153,7 @@ def collect_creator(db: Session, creator: CreatorAccount):
     collector = None
     try:
         collector = get_collector(creator)
+        run.collector_type = collector.collector_type
         profile = collector.fetch_creator_profile(creator)
         creator.nickname = profile.nickname
         creator.avatar_url = profile.avatar_url or creator.avatar_url
@@ -188,6 +206,7 @@ def collect_creator(db: Session, creator: CreatorAccount):
 
         run.status = "partial" if data_quality_status == "partial" else "success"
         run.finished_at = utc_now()
+        run.duration_ms = _duration_ms(started_at, run.finished_at)
         run.result_summary = {
             "collector_type": collector.collector_type,
             "collector_version": collector.version,
@@ -210,6 +229,8 @@ def collect_creator(db: Session, creator: CreatorAccount):
     except Exception as exc:
         db.rollback()
         creator = db.get(CreatorAccount, creator.id)
+        finished_at = utc_now()
+        error_type = type(exc).__name__
         if creator is not None:
             creator.consecutive_failures += 1
             creator.next_collect_at = utc_now() + timedelta(minutes=15)
@@ -220,8 +241,13 @@ def collect_creator(db: Session, creator: CreatorAccount):
         failed_run = CollectionRun(
             creator_id=run.creator_id,
             status="failed",
+            trigger_source=trigger_source,
+            attempt=attempt,
+            collector_type=creator.collector_type if creator is not None else None,
+            error_type=error_type,
+            duration_ms=_duration_ms(started_at, finished_at),
             started_at=started_at,
-            finished_at=utc_now(),
+            finished_at=finished_at,
             error_message=str(exc),
             result_summary={
                 "collector_type": creator.collector_type if creator is not None else "unknown",
@@ -230,8 +256,54 @@ def collect_creator(db: Session, creator: CreatorAccount):
             },
         )
         db.add(failed_run)
+        db.flush()
+        alerts = (
+            evaluate_collection_failure_alert(
+                db,
+                creator,
+                run_id=failed_run.id,
+                error_type=error_type,
+                error_message=str(exc),
+            )
+            if creator is not None
+            else []
+        )
         db.commit()
+        dispatch_alert_notifications(db, alerts)
         raise
+
+
+def record_skipped_collection_run(
+    db: Session,
+    creator: CreatorAccount,
+    *,
+    trigger_source: str,
+    reason: str,
+    attempt: int = 1,
+) -> CollectionRun:
+    now = utc_now()
+    run = CollectionRun(
+        creator_id=creator.id,
+        status="skipped",
+        trigger_source=trigger_source,
+        attempt=attempt,
+        collector_type=creator.collector_type,
+        started_at=now,
+        finished_at=now,
+        duration_ms=0,
+        error_type="CollectionAlreadyRunning",
+        error_message=reason,
+        result_summary={
+            "collector_type": creator.collector_type,
+            "data_quality_status": creator.data_quality_status,
+            "content_status": creator.last_content_status,
+            "reason": reason,
+        },
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
 
 
 def list_snapshots(

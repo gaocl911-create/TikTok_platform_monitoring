@@ -26,7 +26,11 @@ function formatTime(value: string) {
 }
 
 function alertTypeLabel(type: AlertType) {
-  return type === 'new_content' ? '新内容' : '增长预警'
+  return {
+    new_content: '新内容',
+    content_like_growth: '增长预警',
+    collection_failure: '采集失败',
+  }[type]
 }
 
 function notificationLabel(status: AlertRecord['notification_status']) {
@@ -109,7 +113,7 @@ onMounted(load)
       <article class="metric-block">
         <span>启用规则</span>
         <strong>{{ rules.filter((rule) => rule.is_enabled).length }}</strong>
-        <small>新内容与增长规则</small>
+        <small>内容、增长与采集稳定性规则</small>
       </article>
     </section>
 
@@ -123,6 +127,7 @@ onMounted(load)
           <el-select v-model="query.alert_type" placeholder="全部类型" clearable @change="load">
             <el-option label="新内容" value="new_content" />
             <el-option label="增长预警" value="content_like_growth" />
+            <el-option label="采集失败" value="collection_failure" />
           </el-select>
         </section>
 
@@ -176,8 +181,10 @@ onMounted(load)
             </div>
             <el-switch v-model="rule.is_enabled" @change="toggleRule(rule)" />
           </div>
-          <div v-if="rule.alert_type === 'content_like_growth'" class="rule-threshold">
-            <span>单次新增点赞达到</span>
+          <div v-if="rule.alert_type !== 'new_content'" class="rule-threshold">
+            <span>
+              {{ rule.alert_type === 'content_like_growth' ? '单次新增点赞达到' : '连续失败次数达到' }}
+            </span>
             <el-input-number
               v-model="rule.conditions_json.threshold"
               :min="1"

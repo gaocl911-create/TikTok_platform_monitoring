@@ -21,8 +21,12 @@ class Settings(BaseSettings):
     alert_webhook_url: str | None = None
     alert_webhook_timeout_seconds: int = 5
     douyin_browser_path: str | None = None
-    douyin_render_timeout_seconds: int = 45
+    douyin_render_timeout_seconds: int = 75
     douyin_virtual_time_budget_ms: int = 15_000
+    collection_lock_ttl_seconds: int = 180
+    collection_retry_max_retries: int = 3
+    collection_retry_base_delay_seconds: int = 30
+    collection_failure_alert_threshold: int = 3
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

@@ -1,6 +1,7 @@
 import apiClient from './client'
 import type {
   CollectionResult,
+  CollectionRetryQueued,
   Creator,
   CreatorListResponse,
   CreatorPayload,
@@ -44,7 +45,7 @@ export const creatorApi = {
   },
 
   async create(payload: CreatorPayload) {
-    const { data } = await apiClient.post<Creator>('/creators', payload, { timeout: 60_000 })
+    const { data } = await apiClient.post<Creator>('/creators', payload, { timeout: 90_000 })
     return data
   },
 
@@ -58,9 +59,11 @@ export const creatorApi = {
   },
 
   async collect(id: number) {
-    const { data } = await apiClient.post<CollectionResult>(`/creators/${id}/collect`, undefined, {
-      timeout: 60_000,
-    })
+    const { data } = await apiClient.post<CollectionResult | CollectionRetryQueued>(
+      `/creators/${id}/collect`,
+      undefined,
+      { timeout: 90_000 },
+    )
     return data
   },
 

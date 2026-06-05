@@ -1,6 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.alert import Alert
 from app.models.alert_rule import AlertRule
 from app.models.base import utc_now
@@ -21,6 +22,12 @@ DEFAULT_ALERT_RULES = (
         "name": "内容点赞增长",
         "alert_type": "content_like_growth",
         "conditions_json": {"threshold": 20},
+        "notification_channels_json": ["webhook"],
+    },
+    {
+        "name": "采集连续失败",
+        "alert_type": "collection_failure",
+        "conditions_json": {"threshold": settings.collection_failure_alert_threshold},
         "notification_channels_json": ["webhook"],
     },
 )
@@ -80,12 +87,45 @@ def evaluate_content_alerts(
     return alerts
 
 
+def evaluate_collection_failure_alert(
+    db: Session,
+    creator: CreatorAccount,
+    *,
+    run_id: int,
+    error_type: str,
+    error_message: str,
+) -> list[Alert]:
+    rules = ensure_default_alert_rules(db)
+    alerts: list[Alert] = []
+    for rule in rules:
+        if rule.alert_type != "collection_failure":
+            continue
+        threshold = int(
+            rule.conditions_json.get("threshold", settings.collection_failure_alert_threshold)
+        )
+        if creator.consecutive_failures != threshold:
+            continue
+        alerts.extend(
+            _create_alert_once(
+                db,
+                dedupe_key=f"collection_failure:{rule.id}:{creator.id}:{run_id}",
+                creator=creator,
+                post=None,
+                rule=rule,
+                severity="critical",
+                title=f"{creator.nickname} 已连续采集失败 {threshold} 次",
+                message=f"{error_type}：{error_message}",
+            )
+        )
+    return alerts
+
+
 def _create_alert_once(
     db: Session,
     *,
     dedupe_key: str,
     creator: CreatorAccount,
-    post: ContentPost,
+    post: ContentPost | None,
     rule: AlertRule,
     severity: str,
     title: str,
@@ -96,7 +136,7 @@ def _create_alert_once(
         return []
     alert = Alert(
         creator_id=creator.id,
-        content_id=post.id,
+        content_id=post.id if post else None,
         rule_id=rule.id,
         dedupe_key=dedupe_key,
         alert_type=rule.alert_type,
