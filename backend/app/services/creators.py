@@ -434,21 +434,37 @@ def collect_creator(
     collector = None
     try:
         collector = get_collector(context)
-        profile = collector.fetch_creator_profile(context)
-        resolved_display_id = getattr(collector, "_public_account_id", None)
-        collected_context = replace(
-            context,
-            platform_display_id=resolved_display_id or context.platform_display_id,
-            nickname=profile.nickname,
-            avatar_url=profile.avatar_url or context.avatar_url,
-            bio=profile.bio,
-            verified_info=profile.verified_info or context.verified_info,
-            location=profile.location,
-            follower_count=profile.follower_count,
-            following_count=profile.following_count,
-            total_like_count=profile.total_like_count,
-            content_count=profile.content_count,
-        )
+        profile_fetch_skipped = include_content and context.monitor_scope == "single_content"
+        if profile_fetch_skipped:
+            profile = SimpleNamespace(
+                nickname=context.nickname,
+                avatar_url=context.avatar_url,
+                bio=context.bio,
+                verified_info=context.verified_info,
+                location=context.location,
+                follower_count=context.follower_count,
+                following_count=context.following_count,
+                total_like_count=context.total_like_count,
+                content_count=context.content_count,
+            )
+            resolved_display_id = None
+            collected_context = context
+        else:
+            profile = collector.fetch_creator_profile(context)
+            resolved_display_id = getattr(collector, "_public_account_id", None)
+            collected_context = replace(
+                context,
+                platform_display_id=resolved_display_id or context.platform_display_id,
+                nickname=profile.nickname,
+                avatar_url=profile.avatar_url or context.avatar_url,
+                bio=profile.bio,
+                verified_info=profile.verified_info or context.verified_info,
+                location=profile.location,
+                follower_count=profile.follower_count,
+                following_count=profile.following_count,
+                total_like_count=profile.total_like_count,
+                content_count=profile.content_count,
+            )
         if include_content:
             content_profiles = collector.fetch_content_posts(collected_context)
             content_status = collector.content_status
@@ -546,10 +562,17 @@ def collect_creator(
         )
         run.finished_at = utc_now()
         run.duration_ms = _duration_ms(started_at, run.finished_at)
+        collection_scope = (
+            "single_content_metrics"
+            if profile_fetch_skipped
+            else "full"
+            if include_content
+            else "profile"
+        )
         result_summary = {
             "collector_type": collector.collector_type,
             "collector_version": collector.version,
-            "collection_scope": "full" if include_content else "profile",
+            "collection_scope": collection_scope,
             "data_quality_status": data_quality_status,
             "content_status": content_status,
             "warnings": warnings,
@@ -564,6 +587,8 @@ def collect_creator(
             "refreshed_content_count": len(refreshed_content_ids),
             "content_baseline_created": baseline_created,
             "content_baseline_size": len(creator.baseline_content_ids or []),
+            "creator_profile_fetch_skipped": profile_fetch_skipped,
+            "content_list_fetch_skipped": profile_fetch_skipped,
             "expensive_content_fetch_skipped": include_content
             and content_status in {"baseline_created", "no_new_content"},
         }

@@ -507,3 +507,129 @@ def test_content_collection_refreshes_tracked_post_snapshots(
     assert post.latest_collect_count == 4
     assert post.latest_share_count == 2
     assert snapshot_count == 1
+
+
+def test_single_content_collection_skips_creator_profile_fetch(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    class SingleContentMetricsCollector:
+        collector_type = "tikomni_douyin"
+        version = "test-single-content-v1"
+        content_status = "metrics_refreshed"
+        warnings: list[str] = []
+        last_seen_content_ids: list[str] = []
+        new_content_ids: list[str] = []
+        refreshed_content_ids = ["single-aweme"]
+        baseline_created = False
+
+        def fetch_creator_profile(self, creator):
+            raise AssertionError("single-content collection must not fetch creator profile")
+
+        def fetch_content_posts(self, creator):
+            assert creator.monitor_scope == "single_content"
+            assert creator.nickname == "single creator"
+            assert len(creator.tracked_content_posts) == 1
+            assert creator.tracked_content_posts[0].platform_content_id == "single-aweme"
+            return [
+                ContentProfile(
+                    platform_content_id="single-aweme",
+                    title="Single tracked work",
+                    summary=None,
+                    content_type="video",
+                    content_url="https://www.douyin.com/video/single-aweme",
+                    cover_url=None,
+                    published_at=None,
+                    like_count=45,
+                    comment_count=6,
+                    collect_count=7,
+                    share_count=3,
+                    metrics_status="success",
+                    raw_data={"tracking_refresh": True},
+                )
+            ]
+
+        def usage_summary(self):
+            return {
+                "tikomni_request_count": 1,
+                "tikomni_estimated_cost_cny": 0.0375,
+                "tikomni_endpoints": ["fetch_multi_video_statistics"],
+                "tikomni_budget_limited": False,
+            }
+
+    monkeypatch.setattr(
+        "app.services.creators.get_collector",
+        lambda creator: SingleContentMetricsCollector(),
+    )
+    create_response = client.post(
+        "/api/v1/creators",
+        json={
+            **CREATOR_PAYLOAD,
+            "platform_account_id": "single-content-service",
+            "nickname": "single creator",
+            "collector_type": "tikomni_douyin",
+            "monitor_scope": "single_content",
+            "follower_count": 99,
+            "following_count": 8,
+            "total_like_count": 777,
+            "content_count": 2,
+        },
+    )
+    creator_id = create_response.json()["id"]
+
+    override = app.dependency_overrides[get_db]
+    db_gen = override()
+    db = next(db_gen)
+    try:
+        db.add(
+            ContentPost(
+                creator_id=creator_id,
+                platform_content_id="single-aweme",
+                title="Single tracked work",
+                summary=None,
+                content_type="video",
+                content_url="https://www.douyin.com/video/single-aweme",
+                cover_url=None,
+                latest_like_count=30,
+                latest_comment_count=4,
+                latest_collect_count=5,
+                latest_share_count=1,
+                status="active",
+                data_source="tikomni_douyin",
+                metrics_status="success",
+            )
+        )
+        db.commit()
+
+        creator = get_creator(db, creator_id)
+        creator, snapshot, run = collect_creator(
+            db,
+            creator,
+            trigger_source="scheduled",
+            include_content=True,
+        )
+        post = db.scalar(
+            select(ContentPost).where(
+                ContentPost.creator_id == creator_id,
+                ContentPost.platform_content_id == "single-aweme",
+            )
+        )
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+    assert creator.follower_count == 99
+    assert creator.total_like_count == 777
+    assert snapshot.follower_count == 99
+    assert run.status == "success"
+    assert run.result_summary["collection_scope"] == "single_content_metrics"
+    assert run.result_summary["creator_profile_fetch_skipped"] is True
+    assert run.result_summary["content_list_fetch_skipped"] is True
+    assert run.result_summary["tikomni_request_count"] == 1
+    assert run.result_summary["tikomni_endpoints"] == ["fetch_multi_video_statistics"]
+    assert post.latest_like_count == 45
+    assert post.latest_comment_count == 6
+    assert post.latest_collect_count == 7
+    assert post.latest_share_count == 3

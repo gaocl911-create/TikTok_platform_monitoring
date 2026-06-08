@@ -421,6 +421,83 @@ def test_tikomni_collector_refreshes_tracked_content_metrics(
     assert posts[0].raw_data["tracking_refresh"] is True
 
 
+def test_tikomni_single_content_only_refreshes_statistics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "tikomni_enabled", True)
+    monkeypatch.setattr(settings, "tikomni_api_token", "test-token")
+    called_endpoints = []
+
+    def fake_get(self, endpoint, params=None):
+        called_endpoints.append(endpoint)
+        assert endpoint == DOUYIN_MULTI_STATISTICS_ENDPOINT
+        assert params == {"aweme_ids": "7512345678901234567"}
+        return {
+            "code": 200,
+            "data": {
+                "statistics_list": [
+                    {
+                        "aweme_id": "7512345678901234567",
+                        "digg_count": 220,
+                        "comment_count": 22,
+                        "collect_count": 44,
+                        "share_count": 8,
+                    }
+                ]
+            },
+        }
+
+    def fake_post(self, endpoint, payload=None):
+        raise AssertionError("single-content refresh must not fetch post details")
+
+    monkeypatch.setattr(TikOmniClient, "get", fake_get)
+    monkeypatch.setattr(TikOmniClient, "post", fake_post)
+
+    creator = SimpleNamespace(
+        id=1,
+        platform="douyin",
+        platform_account_id="MS4wLjABAAAA",
+        nickname="single work account",
+        profile_url="https://www.douyin.com/user/MS4wLjABAAAA",
+        avatar_url=None,
+        bio=None,
+        verified_info=None,
+        location=None,
+        follower_count=0,
+        following_count=0,
+        total_like_count=0,
+        content_count=0,
+        monitor_interval_minutes=30,
+        monitor_scope="single_content",
+        baseline_content_ids=["7512345678901234567"],
+        known_content_ids=["7512345678901234567"],
+        tracked_content_posts=[
+            SimpleNamespace(
+                platform_content_id="7512345678901234567",
+                title="tracked post",
+                summary=None,
+                content_type="video",
+                content_url="https://www.douyin.com/video/7512345678901234567",
+                cover_url=None,
+                published_at=None,
+                latest_like_count=120,
+                latest_comment_count=12,
+                latest_collect_count=34,
+                latest_share_count=5,
+            )
+        ],
+    )
+
+    collector = TikOmniDouyinCollector()
+    posts = collector.fetch_content_posts(creator)
+
+    assert called_endpoints == [DOUYIN_MULTI_STATISTICS_ENDPOINT]
+    assert collector.content_status == "metrics_refreshed"
+    assert collector.refreshed_content_ids == ["7512345678901234567"]
+    assert len(posts) == 1
+    assert posts[0].like_count == 220
+
+
 def test_tikomni_partial_metrics_still_create_snapshot(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
