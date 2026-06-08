@@ -10,6 +10,7 @@ Platform = Literal["douyin", "xiaohongshu"]
 Priority = Literal["high", "normal", "low"]
 MonitoringStatus = Literal["active", "paused"]
 CollectorType = Literal["mock", "douyin_public_web", "tikomni_douyin"]
+MonitorScope = Literal["creator_collection", "single_content"]
 
 
 class CreatorCreate(BaseModel):
@@ -26,6 +27,7 @@ class CreatorCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     priority: Priority = "normal"
     monitor_interval_minutes: int = Field(default=30, ge=5, le=10080)
+    monitor_scope: MonitorScope = "creator_collection"
     collector_type: CollectorType = "mock"
     follower_count: int = Field(default=0, ge=0)
     following_count: int = Field(default=0, ge=0)
@@ -82,6 +84,7 @@ class CreatorUpdate(BaseModel):
     tags: list[str] | None = None
     priority: Priority | None = None
     monitor_interval_minutes: int | None = Field(default=None, ge=5, le=10080)
+    monitor_scope: MonitorScope | None = None
     monitoring_status: MonitoringStatus | None = None
     collector_type: CollectorType | None = None
 
@@ -108,6 +111,7 @@ class CreatorRead(UtcResponseModel):
     tags: list[str]
     priority: str
     monitor_interval_minutes: int
+    monitor_scope: str
     monitoring_status: str
     collector_type: str
     collector_version: str | None

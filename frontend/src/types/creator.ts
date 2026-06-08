@@ -2,6 +2,7 @@ export type Platform = 'douyin' | 'xiaohongshu'
 export type Priority = 'high' | 'normal' | 'low'
 export type MonitoringStatus = 'active' | 'paused'
 export type CollectorType = 'mock' | 'douyin_public_web' | 'tikomni_douyin'
+export type MonitorScope = 'creator_collection' | 'single_content'
 export type DataQualityStatus = 'pending' | 'mock' | 'verified' | 'partial' | 'failed'
 export type ContentCollectionStatus =
   | 'pending'
@@ -29,6 +30,7 @@ export interface Creator {
   tags: string[]
   priority: Priority
   monitor_interval_minutes: number
+  monitor_scope: MonitorScope
   monitoring_status: MonitoringStatus
   collector_type: CollectorType
   collector_version: string | null
@@ -61,6 +63,7 @@ export interface CreatorPayload {
   tags: string[]
   priority: Priority
   monitor_interval_minutes: number
+  monitor_scope?: MonitorScope
   collector_type: CollectorType
   follower_count?: number
   following_count?: number

@@ -34,6 +34,63 @@ export interface ContentPostListResponse {
   page_size: number
 }
 
+export interface ContentLinkResolveRequest {
+  platform: Platform
+  input_value: string
+}
+
+export interface ContentLinkCreateRequest extends ContentLinkResolveRequest {
+  resolve_token?: string | null
+  creator_id?: number | null
+  group_name?: string | null
+  tags: string[]
+  monitor_interval_minutes: number
+}
+
+export interface ContentCreatorPreview {
+  platform_account_id: string
+  platform_display_id: string | null
+  nickname: string
+  profile_url: string
+  avatar_url: string | null
+  bio: string | null
+  location: string | null
+}
+
+export interface ContentWorkPreview {
+  platform_content_id: string
+  title: string
+  summary: string | null
+  content_type: string
+  content_url: string
+  cover_url: string | null
+  published_at: string | null
+  like_count: number
+  comment_count: number
+  collect_count: number
+  share_count: number
+  metrics_status: 'success' | 'partial' | 'unavailable'
+}
+
+export interface ContentLinkResolveResponse {
+  platform: Platform
+  source_url: string
+  resolve_token: string | null
+  creator: ContentCreatorPreview
+  content: ContentWorkPreview
+  existing_creator_id: number | null
+  existing_post_id: number | null
+  warnings: string[]
+}
+
+export interface ContentLinkCreateResponse {
+  post: ContentPost
+  creator_created: boolean
+  post_created: boolean
+  run_id: number
+  warnings: string[]
+}
+
 export interface ContentSnapshot {
   id: number
   content_id: number

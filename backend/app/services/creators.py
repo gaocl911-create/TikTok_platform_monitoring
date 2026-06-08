@@ -62,6 +62,7 @@ class _CreatorCollectionContext:
     total_like_count: int
     content_count: int
     monitor_interval_minutes: int
+    monitor_scope: str
     baseline_content_ids: list[str]
     known_content_ids: list[str]
     tracked_content_posts: list[_TrackedContentContext]
@@ -111,6 +112,7 @@ def _collection_context(
         total_like_count=creator.total_like_count,
         content_count=creator.content_count,
         monitor_interval_minutes=creator.monitor_interval_minutes,
+        monitor_scope=creator.monitor_scope,
         baseline_content_ids=list(creator.baseline_content_ids or []),
         known_content_ids=known_content_ids or [],
         tracked_content_posts=tracked_content_posts or [],
@@ -220,6 +222,7 @@ def resolve_creator_profile(db: Session, *, platform: str, input_value: str) -> 
         total_like_count=0,
         content_count=0,
         monitor_interval_minutes=30,
+        monitor_scope="creator_collection",
         baseline_content_ids=[],
         known_content_ids=[],
         tracked_content_posts=[],

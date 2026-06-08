@@ -15,17 +15,21 @@ from app.collectors.base import (
     CollectorError,
     CollectorParseError,
     CollectorTransientError,
+    CollectorValidationError,
     ContentProfile,
     CreatorProfile,
 )
 from app.core.config import settings
 from app.models.creator import CreatorAccount
+from app.utils.profile_urls import normalize_profile_url
 
 DOUYIN_SEC_USER_ID_ENDPOINT = "/api/u1/v1/douyin/web/get_sec_user_id"
 DOUYIN_WEB_PROFILE_ENDPOINT = "/api/u1/v1/douyin/app/v3/handler_user_profile"
 DOUYIN_USER_POSTS_ENDPOINT = "/api/u1/v1/douyin/app/v3/fetch_user_post_videos"
 DOUYIN_MULTI_VIDEO_ENDPOINT = "/api/u1/v1/douyin/app/v3/fetch_multi_video"
 DOUYIN_MULTI_STATISTICS_ENDPOINT = "/api/u1/v1/douyin/app/v3/fetch_multi_video_statistics"
+DOUYIN_ONE_VIDEO_APP_ENDPOINT = "/api/u1/v1/douyin/app/v3/fetch_one_video_by_share_url"
+DOUYIN_ONE_VIDEO_WEB_ENDPOINT = "/api/u1/v1/douyin/web/fetch_one_video_by_share_url"
 
 SUCCESS_CODES = {0, 200}
 SUCCESS_STRINGS = {"0", "200", "success", "ok", "true"}
@@ -43,6 +47,30 @@ class TikOmniUsage:
     budget_limited: bool
     budget_cny: Decimal
     spent_today_cny: Decimal
+
+
+@dataclass(slots=True)
+class TikOmniResolvedCreator:
+    platform_account_id: str
+    platform_display_id: str | None
+    nickname: str
+    profile_url: str
+    avatar_url: str | None
+    bio: str | None
+    verified_info: str | None
+    location: str | None
+    follower_count: int
+    following_count: int
+    total_like_count: int
+    content_count: int
+
+
+@dataclass(slots=True)
+class TikOmniResolvedWork:
+    creator: TikOmniResolvedCreator
+    content: ContentProfile
+    source_url: str
+    raw_data: dict[str, Any]
 
 
 class TikOmniClient:
@@ -189,6 +217,9 @@ class TikOmniClient:
             body = exc.read().decode("utf-8", errors="replace")[:500]
         except Exception:
             body = ""
+        friendly_message = _friendly_tikomni_http_error(endpoint, exc.code, body)
+        if friendly_message:
+            raise CollectorValidationError(friendly_message) from exc
         message = f"TikOmni HTTP {exc.code} for {endpoint}"
         if body:
             message = f"{message}: {body}"
@@ -210,6 +241,79 @@ class TikOmniClient:
         if str(code) == "429" or str(code).startswith("5"):
             raise CollectorTransientError(f"TikOmni API temporary failure at {endpoint}: {message}")
         raise CollectorError(f"TikOmni API error at {endpoint}: {message}")
+
+
+class TikOmniDouyinWorkResolver:
+    collector_type = "tikomni_douyin"
+    version = "tikomni-douyin-single-work-v1"
+
+    def __init__(self, *, spent_today_cny: float | Decimal = 0) -> None:
+        if not settings.tikomni_enabled:
+            raise CollectorConfigurationError("TikOmni collector is disabled")
+        self.client = TikOmniClient(spent_today_cny=spent_today_cny)
+        self.warnings: list[str] = []
+
+    def resolve(self, input_value: str) -> TikOmniResolvedWork:
+        source_url = normalize_profile_url(input_value)
+        app_payload: dict[str, Any] | None = None
+        try:
+            app_payload = self.client.get(
+                DOUYIN_ONE_VIDEO_APP_ENDPOINT,
+                {"share_url": source_url},
+            )
+            item = _extract_single_work_dict(_unwrap_data(app_payload))
+        except CollectorError as exc:
+            self.warnings.append(f"App endpoint failed, trying web endpoint: {exc}")
+            item = None
+
+        if item is None:
+            web_payload = self.client.get(
+                DOUYIN_ONE_VIDEO_WEB_ENDPOINT,
+                {"share_url": source_url},
+            )
+            item = _extract_single_work_dict(_unwrap_data(web_payload))
+            payload = web_payload
+        else:
+            payload = app_payload or {}
+
+        if not item:
+            raise CollectorParseError("TikOmni did not return Douyin work detail")
+
+        creator = _map_resolved_work_creator(item)
+        content = _map_content_profile(
+            SimpleCreatorForWork(
+                id=0,
+                platform="douyin",
+                nickname=creator.nickname,
+                collector_type=self.collector_type,
+            ),
+            item,
+            item,
+            _find_statistics_dict(item),
+        )
+        content.raw_data = {
+            **(content.raw_data or {}),
+            "tracking_mode": "single_work",
+            "source_url": source_url,
+            "single_work_payload": payload,
+        }
+        return TikOmniResolvedWork(
+            creator=creator,
+            content=content,
+            source_url=source_url,
+            raw_data=payload,
+        )
+
+    def usage_summary(self) -> dict[str, Any]:
+        return self.client.usage_summary()
+
+
+@dataclass(slots=True)
+class SimpleCreatorForWork:
+    id: int
+    platform: str
+    nickname: str
+    collector_type: str
 
 
 class TikOmniDouyinCollector:
@@ -297,6 +401,31 @@ class TikOmniDouyinCollector:
     def fetch_content_posts(self, creator: CreatorAccount) -> list[ContentProfile]:
         tracked_posts = _tracked_posts_from_creator(creator)
         tracked_content_ids = [post["platform_content_id"] for post in tracked_posts]
+        monitor_scope = getattr(creator, "monitor_scope", "creator_collection")
+
+        if monitor_scope == "single_content":
+            if not tracked_content_ids:
+                self.content_status = "no_new_content"
+                return []
+            statistics_by_id: dict[str, dict[str, Any]] = {}
+            try:
+                statistics_by_id = self._fetch_statistics_by_id(tracked_content_ids)
+            except TikOmniBudgetExceeded as exc:
+                self._mark_budget_limited(exc)
+            self.refreshed_content_ids = list(tracked_content_ids)
+            profiles = [
+                _map_tracked_content_profile(
+                    tracked_post,
+                    statistics_by_id.get(tracked_post["platform_content_id"], {}),
+                )
+                for tracked_post in tracked_posts
+                if statistics_by_id.get(tracked_post["platform_content_id"], {})
+                or self.content_status != "budget_limited"
+            ]
+            if self.content_status != "budget_limited":
+                has_partial = any(profile.metrics_status == "partial" for profile in profiles)
+                self.content_status = "partial" if has_partial else "metrics_refreshed"
+            return profiles
 
         try:
             sec_user_id = self._resolve_sec_user_id(creator)
@@ -444,6 +573,114 @@ def _fallback_creator_profile(creator: CreatorAccount) -> CreatorProfile:
 
 def _chunks(values: list[str], size: int) -> list[list[str]]:
     return [values[index : index + size] for index in range(0, len(values), size)]
+
+
+def _friendly_tikomni_http_error(endpoint: str, status_code: int, body: str) -> str | None:
+    if status_code != 400 or endpoint not in {
+        DOUYIN_ONE_VIDEO_APP_ENDPOINT,
+        DOUYIN_ONE_VIDEO_WEB_ENDPOINT,
+    }:
+        return None
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        payload = {}
+    message = str(payload.get("message") or "").lower()
+    params = payload.get("params") if isinstance(payload, dict) else {}
+    share_url = str(params.get("share_url") or "") if isinstance(params, dict) else ""
+    if "invalid request parameters" not in message:
+        return None
+    if "v.douyin.com" in share_url:
+        return "这个抖音短链无法被 TikOmni 识别，可能已失效或复制不完整；请重新复制作品分享链接，或粘贴 www.douyin.com/video/... 完整作品链接"
+    return "TikOmni 不接受当前作品链接参数，请换成抖音作品页完整链接后重试"
+
+
+def _extract_single_work_dict(data: Any) -> dict[str, Any] | None:
+    if isinstance(data, dict):
+        direct = data.get("aweme_detail") or data.get("aweme_info")
+        if isinstance(direct, dict):
+            return direct
+        for key in ("aweme_details", "aweme_list", "item_list", "items", "list"):
+            value = data.get(key)
+            if isinstance(value, list) and value:
+                first = value[0]
+                if isinstance(first, dict):
+                    return first
+            if isinstance(value, dict):
+                return value
+        if _extract_aweme_id(data):
+            return data
+        for value in data.values():
+            hit = _extract_single_work_dict(value)
+            if hit:
+                return hit
+    if isinstance(data, list):
+        for item in data:
+            hit = _extract_single_work_dict(item)
+            if hit:
+                return hit
+    return None
+
+
+def _find_statistics_dict(data: dict[str, Any]) -> dict[str, Any]:
+    statistics = data.get("statistics")
+    return statistics if isinstance(statistics, dict) else data
+
+
+def _map_resolved_work_creator(item: dict[str, Any]) -> TikOmniResolvedCreator:
+    author = item.get("author") if isinstance(item.get("author"), dict) else {}
+    aweme_id = _extract_aweme_id(item) or "unknown"
+    sec_uid = _find_string(
+        author,
+        ("sec_uid", "sec_user_id", "secUid", "secUserId"),
+    )
+    author_uid = (
+        _find_string(author, ("uid", "id", "user_id"))
+        or _find_string(item, ("author_user_id",))
+    )
+    display_id = _find_string(
+        author,
+        ("unique_id", "short_id", "douyin_id", "display_id", "account_id"),
+    )
+    nickname = _find_string(author, ("nickname", "name")) or display_id or f"作者 {aweme_id[-6:]}"
+    platform_account_id = sec_uid or author_uid or display_id or f"unknown-author-{aweme_id}"
+    profile_url = (
+        f"https://www.douyin.com/user/{sec_uid}"
+        if sec_uid
+        else f"https://www.douyin.com/user/{platform_account_id}"
+    )
+    return TikOmniResolvedCreator(
+        platform_account_id=platform_account_id[:128],
+        platform_display_id=display_id[:128] if display_id else None,
+        nickname=nickname[:128],
+        profile_url=profile_url,
+        avatar_url=_find_image_url(
+            author,
+            ("avatar_thumb", "avatar_medium", "avatar_larger", "avatar_url", "avatar"),
+        ),
+        bio=_find_string(author, ("signature", "desc", "description", "bio")),
+        verified_info=_find_string(
+            author,
+            ("custom_verify", "enterprise_verify_reason", "verify_info"),
+        ),
+        location=_find_string(author, ("ip_location", "province", "city", "location")),
+        follower_count=_find_int(
+            author,
+            ("follower_count", "fans_count", "mplatform_followers_count"),
+            default=0,
+        ),
+        following_count=_find_int(author, ("following_count", "follow_count"), default=0),
+        total_like_count=_find_int(
+            author,
+            ("total_favorited", "favorited_count", "total_like_count", "like_count"),
+            default=0,
+        ),
+        content_count=_find_int(
+            author,
+            ("aweme_count", "video_count", "content_count", "post_count"),
+            default=0,
+        ),
+    )
 
 
 def _map_content_profile(

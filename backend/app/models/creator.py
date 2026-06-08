@@ -41,6 +41,11 @@ class CreatorAccount(TimestampMixin, Base):
     tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     priority: Mapped[str] = mapped_column(String(20), default="normal", nullable=False)
     monitor_interval_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    monitor_scope: Mapped[str] = mapped_column(
+        String(32),
+        default="creator_collection",
+        nullable=False,
+    )
     monitoring_status: Mapped[str] = mapped_column(
         String(20),
         default="active",

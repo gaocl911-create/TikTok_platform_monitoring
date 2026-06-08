@@ -1,10 +1,13 @@
 from types import SimpleNamespace
+from urllib.error import HTTPError
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.collectors.base import ContentProfile, CreatorProfile
+from app.collectors.base import CollectorValidationError, ContentProfile, CreatorProfile
 from app.collectors.tikomni import (
+    DOUYIN_ONE_VIDEO_WEB_ENDPOINT,
     DOUYIN_MULTI_STATISTICS_ENDPOINT,
     DOUYIN_MULTI_VIDEO_ENDPOINT,
     DOUYIN_SEC_USER_ID_ENDPOINT,
@@ -95,6 +98,28 @@ def test_tikomni_client_budget_limit_stops_before_http(monkeypatch: pytest.Monke
     assert called is False
     assert client.usage_summary()["tikomni_budget_limited"] is True
     assert client.usage_summary()["tikomni_request_count"] == 0
+
+
+def test_tikomni_client_explains_invalid_douyin_short_link() -> None:
+    client = TikOmniClient(
+        token="test-token",
+        daily_budget_cny=20,
+        estimated_unit_price_cny=0.008,
+    )
+    body = (
+        b'{"code":400,"params":{"share_url":"https://v.douyin.com/JN_mUZfidzY/"},'
+        b'"message":"Invalid request parameters"}'
+    )
+    error = HTTPError(
+        url="https://api.tikomni.com/test",
+        code=400,
+        msg="Bad Request",
+        hdrs={},
+        fp=BytesIO(body),
+    )
+
+    with pytest.raises(CollectorValidationError, match="抖音短链无法被 TikOmni 识别"):
+        client._raise_http_error(DOUYIN_ONE_VIDEO_WEB_ENDPOINT, error)
 
 
 def test_tikomni_collector_maps_profile_and_content(monkeypatch: pytest.MonkeyPatch) -> None:

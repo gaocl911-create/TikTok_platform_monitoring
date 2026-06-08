@@ -8,6 +8,10 @@ import type {
   AlertStatus,
   AlertType,
   ContentPost,
+  ContentLinkCreateRequest,
+  ContentLinkCreateResponse,
+  ContentLinkResolveRequest,
+  ContentLinkResolveResponse,
   ContentPostListResponse,
   ContentSnapshot,
 } from '../types/monitoring'
@@ -48,6 +52,16 @@ export const monitoringApi = {
 
   async getPostSnapshots(id: number) {
     const { data } = await apiClient.get<ContentSnapshot[]>(`/posts/${id}/snapshots`)
+    return data
+  },
+
+  async resolvePostLink(payload: ContentLinkResolveRequest) {
+    const { data } = await apiClient.post<ContentLinkResolveResponse>('/posts/resolve-link', payload)
+    return data
+  },
+
+  async addPostFromLink(payload: ContentLinkCreateRequest) {
+    const { data } = await apiClient.post<ContentLinkCreateResponse>('/posts/from-link', payload)
     return data
   },
 
