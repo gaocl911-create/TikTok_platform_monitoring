@@ -7,7 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import TrendChart from '../components/TrendChart.vue'
 import { useCreatorStore } from '../stores/creators'
 import type { Creator, CreatorSnapshot } from '../types/creator'
-import { collectorLabel, qualityDescription, qualityLabel } from '../utils/collector'
+import { collectorLabel, creatorQualityLabel, qualityDescription } from '../utils/collector'
 import { formatApiDateTime } from '../utils/datetime'
 
 const route = useRoute()
@@ -34,6 +34,10 @@ function formatNumber(value: number | undefined) {
   return Number(value || 0).toLocaleString('zh-CN')
 }
 
+function displayAccountId(value: Creator) {
+  return value.platform_display_id || value.platform_account_id
+}
+
 function formatTime(value: string | null | undefined) {
   if (!value) return '尚未采集'
   return formatApiDateTime(value)
@@ -57,8 +61,10 @@ async function collect() {
     const result = await store.collectCreator(creatorId.value)
     if (!('run' in result)) {
       ElMessage.warning('首次采集失败，已加入自动重试队列，可在“采集运行”查看进度')
+    } else if (result.run.result_summary?.content_status === 'budget_limited') {
+      ElMessage.warning('TikOmni 预算已达上限，本次已停止继续调用真实 API')
     } else if (result.run.status === 'partial') {
-      ElMessage.warning('真实账号指标已更新，作品明细暂不可用')
+      ElMessage.warning('真实账号指标已更新，部分作品指标暂不可用')
     } else {
       ElMessage.success('公开数据快照已更新')
     }
@@ -107,7 +113,10 @@ onMounted(load)
             <p>{{ creator.bio || '暂无公开简介' }}</p>
             <div class="profile-meta">
               <span>{{ creator.platform === 'douyin' ? '抖音' : '小红书' }}</span>
-              <span>ID {{ creator.platform_account_id }}</span>
+              <span>抖音号 {{ displayAccountId(creator) }}</span>
+              <span v-if="creator.platform_account_id !== displayAccountId(creator)">
+                采集ID {{ creator.platform_account_id.slice(0, 12) }}...
+              </span>
               <span>{{ creator.group_name || '未分组' }}</span>
               <span>{{ creator.location || '地区未知' }}</span>
             </div>
@@ -127,7 +136,7 @@ onMounted(load)
         </div>
         <div>
           <span>数据质量</span>
-          <strong>{{ qualityLabel(creator.data_quality_status) }}</strong>
+          <strong>{{ creatorQualityLabel(creator) }}</strong>
         </div>
         <p>{{ qualityDescription(creator) }}</p>
       </section>
@@ -157,6 +166,12 @@ onMounted(load)
                 ? creator.collector_type === 'mock'
                   ? '模拟作品数据'
                   : '真实作品明细可用'
+                : creator.last_content_status === 'metrics_refreshed'
+                ? '已刷新作品增长指标'
+                : creator.last_content_status === 'budget_limited'
+                ? 'TikOmni 预算限制'
+                : creator.last_content_status === 'partial'
+                ? '部分作品指标可用'
                 : '真实作品明细暂不可用'
             }}
           </small>

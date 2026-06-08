@@ -5,6 +5,8 @@ import type {
   Creator,
   CreatorListResponse,
   CreatorPayload,
+  CreatorProfileResolvePayload,
+  CreatorProfileResolveResult,
   CreatorSnapshot,
   CollectorType,
   MonitoringStatus,
@@ -22,6 +24,7 @@ export interface CreatorQuery {
 
 export interface CreatorUpdatePayload {
   nickname?: string
+  platform_display_id?: string | null
   profile_url?: string
   avatar_url?: string | null
   bio?: string | null
@@ -45,7 +48,16 @@ export const creatorApi = {
   },
 
   async create(payload: CreatorPayload) {
-    const { data } = await apiClient.post<Creator>('/creators', payload, { timeout: 90_000 })
+    const { data } = await apiClient.post<Creator>('/creators', payload)
+    return data
+  },
+
+  async resolveProfile(payload: CreatorProfileResolvePayload) {
+    const { data } = await apiClient.post<CreatorProfileResolveResult>(
+      '/creators/resolve-profile',
+      payload,
+      { timeout: 90_000 },
+    )
     return data
   },
 

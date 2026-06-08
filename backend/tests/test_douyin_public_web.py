@@ -155,20 +155,26 @@ def test_real_collection_partial_status_never_adds_mock_posts(
     create_response = client.post("/api/v1/creators", json=REAL_CREATOR_PAYLOAD)
     assert create_response.status_code == 201
     creator = create_response.json()
-    assert creator["follower_count"] == 414_000
-    assert creator["data_quality_status"] == "partial"
+    assert creator["follower_count"] == 0
+    assert creator["data_quality_status"] == "pending"
     assert creator["collector_type"] == "douyin_public_web"
-    assert creator["last_content_status"] == "unavailable"
+    assert creator["last_content_status"] == "pending"
 
     posts = client.get("/api/v1/posts", params={"creator_id": creator["id"]}).json()
     assert posts["total"] == 0
-    snapshots = client.get(f"/api/v1/creators/{creator['id']}/snapshots").json()
-    assert snapshots[0]["collector_type"] == "douyin_public_web"
-    assert snapshots[0]["data_quality_status"] == "partial"
+    assert client.get(f"/api/v1/creators/{creator['id']}/snapshots").json() == []
 
     collect_response = client.post(f"/api/v1/creators/{creator['id']}/collect")
     assert collect_response.status_code == 200
-    assert collect_response.json()["run"]["status"] == "partial"
+    collected = collect_response.json()
+    assert collected["creator"]["follower_count"] == 414_000
+    assert collected["creator"]["data_quality_status"] == "partial"
+    assert collected["creator"]["last_content_status"] == "unavailable"
+    assert collected["run"]["status"] == "partial"
+
+    snapshots = client.get(f"/api/v1/creators/{creator['id']}/snapshots").json()
+    assert snapshots[0]["collector_type"] == "douyin_public_web"
+    assert snapshots[0]["data_quality_status"] == "partial"
 
 
 def test_real_public_post_without_metrics_has_no_fake_snapshot(
@@ -222,6 +228,9 @@ def test_real_public_post_without_metrics_has_no_fake_snapshot(
         json={**REAL_CREATOR_PAYLOAD, "platform_account_id": "public-post-test"},
     )
     assert response.status_code == 201
+    creator = response.json()
+    assert client.post(f"/api/v1/creators/{creator['id']}/collect").status_code == 200
+
     post = client.get("/api/v1/posts").json()["items"][0]
     assert post["metrics_status"] == "unavailable"
     assert post["published_at"] is None
@@ -247,7 +256,10 @@ def test_real_collection_failure_is_recorded_without_mock_fallback(
     monkeypatch.setattr("app.services.creators.get_collector", lambda creator: FailingCollector())
 
     create_response = client.post("/api/v1/creators", json=REAL_CREATOR_PAYLOAD)
-    assert create_response.status_code == 502
+    assert create_response.status_code == 201
+    creator = create_response.json()
+    collect_response = client.post(f"/api/v1/creators/{creator['id']}/collect")
+    assert collect_response.status_code == 202
 
     items = client.get("/api/v1/creators").json()["items"]
     assert len(items) == 1
@@ -265,6 +277,9 @@ def test_switching_from_mock_to_real_removes_current_mock_data(client: TestClien
         "collector_type": "mock",
     }
     created = client.post("/api/v1/creators", json=payload).json()
+    collect_response = client.post(f"/api/v1/creators/{created['id']}/collect")
+    assert collect_response.status_code == 200
+    created = collect_response.json()["creator"]
     assert created["follower_count"] > 0
     assert client.get("/api/v1/posts", params={"creator_id": created["id"]}).json()["total"] == 3
 
@@ -281,3 +296,71 @@ def test_switching_from_mock_to_real_removes_current_mock_data(client: TestClien
 
     snapshots = client.get(f"/api/v1/creators/{created['id']}/snapshots").json()
     assert snapshots[0]["collector_type"] == "mock"
+
+
+def test_content_feed_orders_null_publish_time_by_discovery_time(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_payload = {
+        **REAL_CREATOR_PAYLOAD,
+        "platform_account_id": "sort-mock-source",
+        "profile_url": "https://www.douyin.com/user/sort-mock-source",
+        "collector_type": "mock",
+    }
+    mock_creator = client.post("/api/v1/creators", json=mock_payload).json()
+    assert client.post(f"/api/v1/creators/{mock_creator['id']}/collect").status_code == 200
+
+    class NullPublishTimeCollector:
+        collector_type = "douyin_public_web"
+        version = "test-real-sort-v1"
+        content_status = "partial"
+        warnings = ["公开作品未提供发布时间"]
+
+        def fetch_creator_profile(self, creator):
+            return CreatorProfile(
+                nickname="真实排序账号",
+                avatar_url=None,
+                bio="真实公开简介",
+                verified_info=None,
+                location="山东",
+                follower_count=100,
+                following_count=10,
+                total_like_count=1000,
+                content_count=1,
+            )
+
+        def fetch_content_posts(self, creator):
+            return [
+                ContentProfile(
+                    platform_content_id="real-null-published-at",
+                    title="刚刚发现的真实作品",
+                    summary=None,
+                    content_type="video",
+                    content_url="https://www.douyin.com/video/real-null-published-at",
+                    cover_url=None,
+                    published_at=None,
+                    like_count=0,
+                    comment_count=0,
+                    collect_count=0,
+                    share_count=0,
+                    metrics_status="unavailable",
+                )
+            ]
+
+    monkeypatch.setattr(
+        "app.services.creators.get_collector",
+        lambda creator: NullPublishTimeCollector(),
+    )
+    real_payload = {
+        **REAL_CREATOR_PAYLOAD,
+        "platform_account_id": "sort-real-source",
+        "profile_url": "https://www.douyin.com/user/sort-real-source",
+    }
+    real_creator = client.post("/api/v1/creators", json=real_payload).json()
+    assert client.post(f"/api/v1/creators/{real_creator['id']}/collect").status_code == 200
+
+    posts = client.get("/api/v1/posts").json()["items"]
+    assert posts[0]["platform_content_id"] == "real-null-published-at"
+    assert posts[0]["published_at"] is None
+    assert posts[0]["data_source"] == "douyin_public_web"

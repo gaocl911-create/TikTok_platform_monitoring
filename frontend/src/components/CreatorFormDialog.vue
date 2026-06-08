@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { FormInstance, FormRules } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { computed, reactive, ref, watch } from 'vue'
 
-import type { Creator, CreatorPayload } from '../types/creator'
+import { creatorApi } from '../api/creators'
+import type { Creator, CreatorPayload, CreatorProfileResolveResult } from '../types/creator'
 import { isValidProfileUrl, normalizeProfileUrl } from '../utils/profileUrl'
 
 const props = defineProps<{
@@ -17,33 +19,48 @@ const emit = defineEmits<{
 }>()
 
 const formRef = ref<FormInstance>()
+const resolving = ref(false)
+const resolvedProfile = ref<CreatorProfileResolveResult | null>(null)
 const form = reactive<CreatorPayload>({
   platform: 'douyin',
   platform_account_id: '',
+  platform_display_id: '',
   nickname: '',
   profile_url: '',
+  avatar_url: null,
+  bio: null,
+  verified_info: null,
+  location: null,
   group_name: '',
   tags: [],
   priority: 'normal',
-  monitor_interval_minutes: 60,
-  collector_type: 'douyin_public_web',
+  monitor_interval_minutes: 30,
+  collector_type: 'tikomni_douyin',
+  follower_count: 0,
+  following_count: 0,
+  total_like_count: 0,
+  content_count: 0,
+  profile_resolved: false,
 })
 
 const isEditing = computed(() => Boolean(props.creator))
-const collectorOptions = computed(() => [
-  {
-    label: '真实公开数据',
-    value: 'douyin_public_web',
-    disabled: form.platform !== 'douyin',
-  },
-  { label: '模拟数据', value: 'mock' },
+const isDouyin = computed(() => form.platform === 'douyin')
+const resolveInputValue = computed(
+  () => form.profile_url.trim() || form.platform_display_id?.trim() || form.platform_account_id.trim(),
+)
+const canResolve = computed(() => isDouyin.value && !isEditing.value && Boolean(resolveInputValue.value))
+
+const platformOptions = computed(() => [
+  { label: '抖音', value: 'douyin' },
+  { label: '小红书', value: 'xiaohongshu' },
 ])
+
 const rules: FormRules<CreatorPayload> = {
-  platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
-  platform_account_id: [{ required: true, message: '请输入平台账号 ID', trigger: 'blur' }],
-  nickname: [{ required: true, message: '请输入账号昵称', trigger: 'blur' }],
+  platform: [{ required: true, message: '请选择数据来源', trigger: 'change' }],
+  platform_account_id: [{ required: true, message: '请先识别账号，生成采集ID', trigger: 'blur' }],
+  nickname: [{ required: true, message: '请先识别或输入作者昵称', trigger: 'blur' }],
   profile_url: [
-    { required: true, message: '请输入账号主页链接或平台分享文案', trigger: 'blur' },
+    { required: true, message: '请粘贴账号主页链接或平台分享文案', trigger: 'blur' },
     {
       validator: (_rule, value: string, callback) => {
         if (isValidProfileUrl(value)) callback()
@@ -64,14 +81,28 @@ watch(
     Object.assign(form, {
       platform: creator?.platform || 'douyin',
       platform_account_id: creator?.platform_account_id || '',
+      platform_display_id: creator?.platform_display_id || '',
       nickname: creator?.nickname || '',
       profile_url: creator?.profile_url || '',
+      avatar_url: creator?.avatar_url || null,
+      bio: creator?.bio || null,
+      verified_info: creator?.verified_info || null,
+      location: creator?.location || null,
       group_name: creator?.group_name || '',
       tags: creator?.tags || [],
       priority: creator?.priority || 'normal',
-      monitor_interval_minutes: creator?.monitor_interval_minutes || 60,
-      collector_type: creator?.collector_type || 'douyin_public_web',
+      monitor_interval_minutes: creator?.monitor_interval_minutes || 30,
+      collector_type: creator?.collector_type || 'tikomni_douyin',
+      follower_count: creator?.follower_count || 0,
+      following_count: creator?.following_count || 0,
+      total_like_count: creator?.total_like_count || 0,
+      content_count: creator?.content_count || 0,
+      profile_resolved: false,
     })
+    if (!creator && form.platform === 'douyin') {
+      form.collector_type = 'tikomni_douyin'
+    }
+    resolvedProfile.value = null
     formRef.value?.clearValidate()
   },
   { immediate: true },
@@ -80,13 +111,71 @@ watch(
 watch(
   () => form.platform,
   (platform) => {
-    if (platform !== 'douyin' && form.collector_type === 'douyin_public_web') {
-      form.collector_type = 'mock'
-    }
+    form.collector_type = platform === 'douyin' ? 'tikomni_douyin' : 'mock'
+    resolvedProfile.value = null
+    formRef.value?.clearValidate()
   },
 )
 
+function formatNumber(value: number) {
+  return value.toLocaleString('zh-CN')
+}
+
+function applyResolvedProfile(profile: CreatorProfileResolveResult) {
+  form.platform_account_id = profile.platform_account_id
+  form.platform_display_id = profile.platform_display_id
+  form.nickname = profile.nickname
+  form.profile_url = profile.profile_url
+  form.avatar_url = profile.avatar_url
+  form.bio = profile.bio
+  form.verified_info = profile.verified_info
+  form.location = profile.location
+  form.follower_count = profile.follower_count
+  form.following_count = profile.following_count
+  form.total_like_count = profile.total_like_count
+  form.content_count = profile.content_count
+  form.collector_type = 'tikomni_douyin'
+  form.profile_resolved = true
+  resolvedProfile.value = profile
+}
+
+async function handleResolveProfile() {
+  if (!isDouyin.value) {
+    ElMessage.warning('小红书数据源已预留，当前阶段先接入抖音')
+    return
+  }
+  if (!resolveInputValue.value) {
+    ElMessage.warning('请先输入抖音号、主页链接或分享文案')
+    return
+  }
+
+  resolving.value = true
+  try {
+    const profile = await creatorApi.resolveProfile({
+      platform: form.platform,
+      input_value: resolveInputValue.value,
+    })
+    applyResolvedProfile(profile)
+    formRef.value?.clearValidate(['platform_account_id', 'nickname', 'profile_url'])
+    if (profile.warnings.length > 0) {
+      ElMessage.warning(profile.warnings[0])
+    } else {
+      ElMessage.success('账号主页信息已识别')
+    }
+  } finally {
+    resolving.value = false
+  }
+}
+
 async function handleSubmit() {
+  if (!isDouyin.value) {
+    ElMessage.warning('小红书数据源已预留，当前阶段先接入抖音')
+    return
+  }
+  if (!isEditing.value && !form.profile_resolved && resolveInputValue.value) {
+    await handleResolveProfile()
+  }
+  form.collector_type = 'tikomni_douyin'
   form.profile_url = normalizeProfileUrl(form.profile_url)
   await formRef.value?.validate()
   emit('submit', { ...form, tags: [...form.tags] })
@@ -101,19 +190,16 @@ function normalizeUrlField() {
   <el-dialog
     :model-value="modelValue"
     :title="isEditing ? '编辑监控账号' : '添加监控账号'"
-    width="560px"
+    width="640px"
     destroy-on-close
     @update:model-value="emit('update:modelValue', $event)"
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
       <div class="form-grid">
-        <el-form-item label="平台" prop="platform">
+        <el-form-item label="数据来源" prop="platform">
           <el-segmented
             v-model="form.platform"
-            :options="[
-              { label: '抖音', value: 'douyin' },
-              { label: '小红书', value: 'xiaohongshu' },
-            ]"
+            :options="platformOptions"
             :disabled="isEditing"
           />
         </el-form-item>
@@ -126,41 +212,89 @@ function normalizeUrlField() {
         </el-form-item>
       </div>
 
-      <el-form-item label="数据来源" prop="collector_type">
-        <el-segmented v-model="form.collector_type" :options="collectorOptions" />
-        <p class="source-hint">
-          {{
-            form.collector_type === 'douyin_public_web'
-              ? '通过标准浏览器读取公开主页；无法取得的内容会明确标记，不会使用模拟数据补全。'
-              : '用于开发和演示，会生成模拟账号指标与作品。'
-          }}
-        </p>
+      <el-alert
+        v-if="form.platform === 'xiaohongshu'"
+        class="source-alert"
+        type="info"
+        title="小红书待接入"
+        description="当前阶段先实现抖音主页识别和真实采集。"
+        show-icon
+        :closable="false"
+      />
+
+      <el-form-item label="账号主页 / 分享链接" prop="profile_url">
+        <el-input
+          v-model="form.profile_url"
+          placeholder="粘贴抖音主页链接、短链或分享文案"
+          :disabled="!isDouyin"
+          @blur="normalizeUrlField"
+        >
+          <template #append>
+            <el-button
+              :loading="resolving"
+              :disabled="!canResolve"
+              @click="handleResolveProfile"
+            >
+              识别账号
+            </el-button>
+          </template>
+        </el-input>
       </el-form-item>
 
       <div class="form-grid">
-        <el-form-item label="账号昵称" prop="nickname">
-          <el-input v-model="form.nickname" placeholder="用于快速识别账号" />
+        <el-form-item label="作者昵称" prop="nickname">
+          <el-input v-model="form.nickname" placeholder="识别后自动回填，可手动修正" />
         </el-form-item>
-        <el-form-item label="平台账号 ID" prop="platform_account_id">
+        <el-form-item label="抖音号">
           <el-input
-            v-model="form.platform_account_id"
-            placeholder="平台内唯一 ID"
-            :disabled="isEditing"
+            v-model="form.platform_display_id"
+            placeholder="识别后显示，例如 34867887966"
           />
         </el-form-item>
       </div>
 
-      <el-form-item label="账号主页链接" prop="profile_url">
+      <el-form-item label="采集ID（sec_user_id）" prop="platform_account_id">
         <el-input
-          v-model="form.profile_url"
-          placeholder="可直接粘贴平台分享文案或 https://..."
-          @blur="normalizeUrlField"
+          v-model="form.platform_account_id"
+          placeholder="系统自动识别，用于真实采集"
+          :disabled="isEditing"
+          readonly
         />
       </el-form-item>
 
+      <section v-if="resolvedProfile" class="profile-preview">
+        <div class="preview-heading">
+          <el-avatar :size="40" :src="resolvedProfile.avatar_url || undefined">
+            {{ resolvedProfile.nickname.slice(0, 1) }}
+          </el-avatar>
+          <div>
+            <strong>{{ resolvedProfile.nickname }}</strong>
+            <small>{{ resolvedProfile.bio || '暂无简介' }}</small>
+          </div>
+        </div>
+        <dl>
+          <div>
+            <dt>粉丝</dt>
+            <dd>{{ formatNumber(resolvedProfile.follower_count) }}</dd>
+          </div>
+          <div>
+            <dt>关注</dt>
+            <dd>{{ formatNumber(resolvedProfile.following_count) }}</dd>
+          </div>
+          <div>
+            <dt>获赞</dt>
+            <dd>{{ formatNumber(resolvedProfile.total_like_count) }}</dd>
+          </div>
+          <div>
+            <dt>作品</dt>
+            <dd>{{ formatNumber(resolvedProfile.content_count) }}</dd>
+          </div>
+        </dl>
+      </section>
+
       <div class="form-grid">
-        <el-form-item label="账号分组">
-          <el-input v-model="form.group_name" placeholder="例如：竞品观察" />
+        <el-form-item label="作者备注">
+          <el-input v-model="form.group_name" placeholder="例如：科技类竞品、重点观察" />
         </el-form-item>
         <el-form-item label="采集间隔" prop="monitor_interval_minutes">
           <el-select v-model="form.monitor_interval_minutes">
@@ -187,8 +321,13 @@ function normalizeUrlField() {
 
     <template #footer>
       <el-button @click="emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="handleSubmit">
-        {{ isEditing ? '保存修改' : '添加并采集' }}
+      <el-button
+        type="primary"
+        :loading="submitting || resolving"
+        :disabled="form.platform !== 'douyin'"
+        @click="handleSubmit"
+      >
+        {{ isEditing ? '保存修改' : '添加并采集主页' }}
       </el-button>
     </template>
   </el-dialog>
@@ -206,17 +345,67 @@ function normalizeUrlField() {
   width: 100%;
 }
 
-.source-hint {
-  margin: 7px 0 0;
-  color: #77808c;
-  font-size: 11px;
-  line-height: 1.5;
+.source-alert {
+  margin: 0 0 16px;
+}
+
+.profile-preview {
+  margin: 0 0 18px;
+  padding: 14px;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.preview-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.preview-heading strong,
+.preview-heading small {
+  display: block;
+}
+
+.preview-heading small {
+  margin-top: 3px;
+  color: #718096;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
+}
+
+.profile-preview dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+}
+
+.profile-preview dt {
+  color: #7b8794;
+  font-size: 12px;
+}
+
+.profile-preview dd {
+  margin: 4px 0 0;
+  color: #102033;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 @media (max-width: 620px) {
-  .form-grid {
+  .form-grid,
+  .profile-preview dl {
     grid-template-columns: 1fr;
     gap: 0;
+  }
+
+  .preview-heading small {
+    max-width: 240px;
   }
 }
 </style>

@@ -9,21 +9,29 @@ from app.utils.profile_urls import normalize_profile_url
 Platform = Literal["douyin", "xiaohongshu"]
 Priority = Literal["high", "normal", "low"]
 MonitoringStatus = Literal["active", "paused"]
-CollectorType = Literal["mock", "douyin_public_web"]
+CollectorType = Literal["mock", "douyin_public_web", "tikomni_douyin"]
 
 
 class CreatorCreate(BaseModel):
     platform: Platform
     platform_account_id: str = Field(min_length=1, max_length=128)
+    platform_display_id: str | None = Field(default=None, max_length=128)
     nickname: str = Field(min_length=1, max_length=128)
     profile_url: str = Field(min_length=1, max_length=500)
     avatar_url: str | None = Field(default=None, max_length=1000)
     bio: str | None = None
+    verified_info: str | None = Field(default=None, max_length=255)
+    location: str | None = Field(default=None, max_length=128)
     group_name: str | None = Field(default=None, max_length=128)
     tags: list[str] = Field(default_factory=list)
     priority: Priority = "normal"
-    monitor_interval_minutes: int = Field(default=60, ge=5, le=10080)
+    monitor_interval_minutes: int = Field(default=30, ge=5, le=10080)
     collector_type: CollectorType = "mock"
+    follower_count: int = Field(default=0, ge=0)
+    following_count: int = Field(default=0, ge=0)
+    total_like_count: int = Field(default=0, ge=0)
+    content_count: int = Field(default=0, ge=0)
+    profile_resolved: bool = False
 
     @field_validator("profile_url", mode="before")
     @classmethod
@@ -32,13 +40,41 @@ class CreatorCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_collector_type(self) -> Self:
-        if self.collector_type == "douyin_public_web" and self.platform != "douyin":
-            raise ValueError("抖音公开主页采集器只能用于抖音账号")
+        if (
+            self.collector_type in {"douyin_public_web", "tikomni_douyin"}
+            and self.platform != "douyin"
+        ):
+            raise ValueError("抖音真实采集器只能用于抖音账号")
         return self
+
+
+class CreatorProfileResolveRequest(BaseModel):
+    platform: Platform
+    input_value: str = Field(min_length=1, max_length=1000)
+
+
+class CreatorProfileResolveResponse(BaseModel):
+    platform: Platform
+    platform_account_id: str
+    platform_display_id: str | None = None
+    nickname: str
+    profile_url: str
+    avatar_url: str | None = None
+    bio: str | None = None
+    verified_info: str | None = None
+    location: str | None = None
+    follower_count: int
+    following_count: int
+    total_like_count: int
+    content_count: int
+    collector_type: CollectorType
+    sec_user_id: str | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CreatorUpdate(BaseModel):
     nickname: str | None = Field(default=None, min_length=1, max_length=128)
+    platform_display_id: str | None = Field(default=None, max_length=128)
     profile_url: str | None = Field(default=None, min_length=1, max_length=500)
     avatar_url: str | None = Field(default=None, max_length=1000)
     bio: str | None = None
@@ -61,6 +97,7 @@ class CreatorRead(UtcResponseModel):
     id: int
     platform: str
     platform_account_id: str
+    platform_display_id: str | None
     nickname: str
     profile_url: str
     avatar_url: str | None
@@ -77,6 +114,7 @@ class CreatorRead(UtcResponseModel):
     data_quality_status: str
     last_content_status: str
     last_collection_error: str | None
+    content_baseline_established_at: datetime | None
     follower_count: int
     following_count: int
     total_like_count: int

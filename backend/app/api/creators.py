@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -12,6 +13,8 @@ from app.schemas.creator import (
     CollectionRetryQueued,
     CreatorCreate,
     CreatorListResponse,
+    CreatorProfileResolveRequest,
+    CreatorProfileResolveResponse,
     CreatorRead,
     CreatorSnapshotRead,
     CreatorUpdate,
@@ -26,12 +29,14 @@ from app.services.creators import (
     list_creators,
     list_snapshots,
     record_skipped_collection_run,
+    resolve_creator_profile,
     update_creator,
 )
 from app.tasks.collection import collect_creator_task
 
 router = APIRouter(prefix="/creators", tags=["creators"])
 DbSession = Annotated[Session, Depends(get_db)]
+logger = logging.getLogger(__name__)
 
 
 def require_creator(db: Session, creator_id: int):
@@ -50,13 +55,11 @@ def create_creator_endpoint(payload: CreatorCreate, db: DbSession):
             status_code=status.HTTP_409_CONFLICT,
             detail="该平台账号已经处于监控列表中",
         ) from exc
-    try:
-        creator, _, _ = collect_creator(db, creator, trigger_source="initial")
-    except CollectorError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"账号已添加，但首次真实采集失败：{exc}",
-        ) from exc
+    if not payload.profile_resolved:
+        try:
+            collect_creator_task.apply_async(args=[creator.id, "initial", False], countdown=0)
+        except Exception:
+            logger.warning("failed to enqueue initial collection", exc_info=True)
     return creator
 
 
@@ -78,6 +81,26 @@ def list_creators_endpoint(
         search=search,
     )
     return CreatorListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.post("/resolve-profile", response_model=CreatorProfileResolveResponse)
+def resolve_creator_profile_endpoint(payload: CreatorProfileResolveRequest, db: DbSession):
+    try:
+        return resolve_creator_profile(
+            db,
+            platform=payload.platform,
+            input_value=payload.input_value,
+        )
+    except CollectorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/{creator_id}", response_model=CreatorRead)

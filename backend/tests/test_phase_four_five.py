@@ -28,7 +28,7 @@ def test_collection_runs_api_exposes_observability_fields(client: TestClient) ->
     response = client.get("/api/v1/collection-runs", params={"creator_id": creator["id"]})
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 2
+    assert body["total"] == 1
     assert body["items"][0]["trigger_source"] == "manual"
     assert body["items"][0]["attempt"] == 1
     assert body["items"][0]["collector_type"] == "mock"
@@ -74,13 +74,15 @@ def test_consecutive_collection_failures_create_system_alert(
 
     monkeypatch.setattr("app.services.creators.get_collector", lambda creator: FailingCollector())
 
-    assert client.post("/api/v1/creators", json=CREATOR_PAYLOAD).status_code == 502
+    assert client.post("/api/v1/creators", json=CREATOR_PAYLOAD).status_code == 201
     creator = client.get("/api/v1/creators").json()["items"][0]
     first_retry = client.post(f"/api/v1/creators/{creator['id']}/collect")
     second_retry = client.post(f"/api/v1/creators/{creator['id']}/collect")
+    third_retry = client.post(f"/api/v1/creators/{creator['id']}/collect")
     assert first_retry.status_code == 202
     assert first_retry.json()["status"] == "queued"
     assert second_retry.status_code == 202
+    assert third_retry.status_code == 202
 
     alerts = client.get("/api/v1/alerts", params={"alert_type": "collection_failure"}).json()
     assert alerts["total"] == 1

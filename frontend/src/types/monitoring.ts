@@ -22,8 +22,8 @@ export interface ContentPost {
   latest_collect_count: number
   latest_share_count: number
   status: string
-  data_source: 'mock' | 'douyin_public_web'
-  metrics_status: 'success' | 'unavailable'
+  data_source: 'mock' | 'douyin_public_web' | 'tikomni_douyin'
+  metrics_status: 'success' | 'partial' | 'unavailable'
   creator: ContentCreator
 }
 

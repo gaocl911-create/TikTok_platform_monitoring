@@ -18,8 +18,10 @@ def collect_creator_task(
     self,
     creator_id: int,
     trigger_source: str = "scheduled",
+    include_content: bool | None = None,
 ) -> dict[str, int | str]:
     attempt = int(self.request.retries) + 1
+    should_include_content = trigger_source != "initial" if include_content is None else include_content
     try:
         lock = acquire_creator_collection_lock(creator_id)
     except RedisError as exc:
@@ -59,6 +61,7 @@ def collect_creator_task(
                 creator,
                 trigger_source=trigger_source,
                 attempt=attempt,
+                include_content=should_include_content,
             )
             return {
                 "creator_id": creator.id,

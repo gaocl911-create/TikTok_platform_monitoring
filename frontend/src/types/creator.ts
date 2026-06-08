@@ -1,14 +1,24 @@
 export type Platform = 'douyin' | 'xiaohongshu'
 export type Priority = 'high' | 'normal' | 'low'
 export type MonitoringStatus = 'active' | 'paused'
-export type CollectorType = 'mock' | 'douyin_public_web'
+export type CollectorType = 'mock' | 'douyin_public_web' | 'tikomni_douyin'
 export type DataQualityStatus = 'pending' | 'mock' | 'verified' | 'partial' | 'failed'
-export type ContentCollectionStatus = 'pending' | 'success' | 'unavailable' | 'failed'
+export type ContentCollectionStatus =
+  | 'pending'
+  | 'success'
+  | 'partial'
+  | 'unavailable'
+  | 'baseline_created'
+  | 'no_new_content'
+  | 'metrics_refreshed'
+  | 'budget_limited'
+  | 'failed'
 
 export interface Creator {
   id: number
   platform: Platform
   platform_account_id: string
+  platform_display_id: string | null
   nickname: string
   profile_url: string
   avatar_url: string | null
@@ -25,6 +35,7 @@ export interface Creator {
   data_quality_status: DataQualityStatus
   last_content_status: ContentCollectionStatus
   last_collection_error: string | null
+  content_baseline_established_at: string | null
   follower_count: number
   following_count: number
   total_like_count: number
@@ -39,15 +50,47 @@ export interface Creator {
 export interface CreatorPayload {
   platform: Platform
   platform_account_id: string
+  platform_display_id?: string | null
   nickname: string
   profile_url: string
   avatar_url?: string | null
   bio?: string | null
+  verified_info?: string | null
+  location?: string | null
   group_name?: string | null
   tags: string[]
   priority: Priority
   monitor_interval_minutes: number
   collector_type: CollectorType
+  follower_count?: number
+  following_count?: number
+  total_like_count?: number
+  content_count?: number
+  profile_resolved?: boolean
+}
+
+export interface CreatorProfileResolvePayload {
+  platform: Platform
+  input_value: string
+}
+
+export interface CreatorProfileResolveResult {
+  platform: Platform
+  platform_account_id: string
+  platform_display_id: string | null
+  nickname: string
+  profile_url: string
+  avatar_url: string | null
+  bio: string | null
+  verified_info: string | null
+  location: string | null
+  follower_count: number
+  following_count: number
+  total_like_count: number
+  content_count: number
+  collector_type: CollectorType
+  sec_user_id: string | null
+  warnings: string[]
 }
 
 export interface CreatorListResponse {

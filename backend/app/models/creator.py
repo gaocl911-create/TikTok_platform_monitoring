@@ -30,6 +30,7 @@ class CreatorAccount(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
     platform_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    platform_display_id: Mapped[str | None] = mapped_column(String(128), index=True)
     nickname: Mapped[str] = mapped_column(String(128), nullable=False)
     profile_url: Mapped[str] = mapped_column(String(500), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(String(1000))
@@ -39,7 +40,7 @@ class CreatorAccount(TimestampMixin, Base):
     group_name: Mapped[str | None] = mapped_column(String(128), index=True)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     priority: Mapped[str] = mapped_column(String(20), default="normal", nullable=False)
-    monitor_interval_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    monitor_interval_minutes: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     monitoring_status: Mapped[str] = mapped_column(
         String(20),
         default="active",
@@ -58,6 +59,8 @@ class CreatorAccount(TimestampMixin, Base):
         nullable=False,
     )
     last_collection_error: Mapped[str | None] = mapped_column(Text)
+    baseline_content_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    content_baseline_established_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     follower_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     following_count: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)

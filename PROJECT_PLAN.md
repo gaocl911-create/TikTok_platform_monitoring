@@ -989,3 +989,31 @@ MySQL 可以处理该规模，但需要：
 10. 再扩展评论分析、榜单和后台授权数据。
 
 这样可以确保即使真实平台采集暂时受限，系统主体仍然能够完成开发、测试和演示。
+
+---
+
+## 阶段 5：TikOmni 真实内容数据源接入
+
+本阶段新增 `tikomni_douyin` 真实 API 数据源，目标是解决 `douyin_public_web` 公开主页渲染经常拿不到作品列表的问题，让“内容动态”页优先展示真实作品和真实互动指标。
+
+第一版范围：
+
+- 只接抖音 TikOmni，不同时接小红书。
+- 只采集作品互动数量，不采集评论正文。
+- 采集字段包括点赞数、评论数、收藏数、分享数、发布时间、标题/文案、封面、作品链接。
+- 沿用现有 `creator_accounts`、`creator_snapshots`、`content_posts`、`content_snapshots`、`collection_runs` 表。
+- TikOmni 请求数、估算成本和 endpoint 明细写入 `collection_runs.result_summary`。
+- 超过 `TIKOMNI_DAILY_BUDGET_CNY` 后停止继续调用真实 API，不回退 mock。
+
+配置项：
+
+```env
+TIKOMNI_ENABLED=true
+TIKOMNI_API_BASE_URL=https://api.tikomni.com
+TIKOMNI_API_TOKEN=
+TIKOMNI_TIMEOUT_SECONDS=60
+TIKOMNI_DAILY_BUDGET_CNY=20
+TIKOMNI_ESTIMATED_UNIT_PRICE_CNY=0.008
+```
+
+详细实施文档见：[docs/PHASE_5_TIKOMNI.md](docs/PHASE_5_TIKOMNI.md)。

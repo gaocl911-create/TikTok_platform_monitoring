@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     collection_retry_max_retries: int = 3
     collection_retry_base_delay_seconds: int = 30
     collection_failure_alert_threshold: int = 3
+    tikomni_enabled: bool = True
+    tikomni_api_base_url: str = "https://api.tikomni.com"
+    tikomni_api_token: str | None = None
+    tikomni_timeout_seconds: int = 60
+    tikomni_daily_budget_cny: float = 20
+    tikomni_estimated_unit_price_cny: float = 0.008
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

@@ -26,6 +26,14 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 }
 
+function displayTime(post: ContentPost) {
+  return post.published_at || post.first_discovered_at
+}
+
+function timeLabel(post: ContentPost) {
+  return post.published_at ? '发布于' : '发现于'
+}
+
 function formatTime(value: string | null) {
   if (!value) return '公开页面未提供'
   return formatApiDateTime(value, {
@@ -37,7 +45,19 @@ function formatTime(value: string | null) {
 }
 
 function formatMetric(post: ContentPost, value: number) {
-  return post.metrics_status === 'success' ? formatNumber(value) : '--'
+  return post.metrics_status === 'unavailable' ? '--' : formatNumber(value)
+}
+
+function sourceBadgeClass(post: ContentPost) {
+  if (post.data_source === 'mock') return 'mock'
+  if (post.data_source === 'tikomni_douyin') return 'tikomni'
+  return 'verified'
+}
+
+function sourceBadgeLabel(post: ContentPost) {
+  if (post.data_source === 'mock') return '小红书待接入'
+  if (post.data_source === 'tikomni_douyin') return '抖音真实内容'
+  return '真实公开内容'
 }
 
 async function load() {
@@ -102,9 +122,9 @@ onMounted(load)
             <span class="platform-dot" :class="post.creator.platform"></span>
             <strong>{{ post.creator.nickname }}</strong>
             <span>{{ post.creator.platform === 'douyin' ? '抖音' : '小红书' }}</span>
-            <span>发布于 {{ formatTime(post.published_at) }}</span>
-            <span class="quality-badge" :class="post.data_source === 'mock' ? 'mock' : 'verified'">
-              {{ post.data_source === 'mock' ? '模拟内容' : '真实公开内容' }}
+            <span>{{ timeLabel(post) }} {{ formatTime(displayTime(post)) }}</span>
+            <span class="quality-badge" :class="sourceBadgeClass(post)">
+              {{ sourceBadgeLabel(post) }}
             </span>
           </div>
           <h3>{{ post.title }}</h3>

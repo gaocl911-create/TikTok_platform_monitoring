@@ -19,6 +19,15 @@ def test_content_discovery_snapshot_and_alert_workflow(client: TestClient) -> No
 
     first_posts_response = client.get("/api/v1/posts", params={"creator_id": creator["id"]})
     assert first_posts_response.status_code == 200
+    assert first_posts_response.json()["total"] == 0
+
+    first_collect_response = client.post(f"/api/v1/creators/{creator['id']}/collect")
+    assert first_collect_response.status_code == 200
+    first_summary = first_collect_response.json()["run"]["result_summary"]
+    assert first_summary["new_content_count"] == 3
+
+    first_posts_response = client.get("/api/v1/posts", params={"creator_id": creator["id"]})
+    assert first_posts_response.status_code == 200
     first_posts = first_posts_response.json()
     assert first_posts["total"] == 3
     assert len({post["platform_content_id"] for post in first_posts["items"]}) == 3

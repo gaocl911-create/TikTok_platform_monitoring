@@ -12,6 +12,7 @@ from app.collectors.base import (
 from app.collectors.douyin_public_web import DouyinPublicWebCollector
 from app.collectors.factory import get_collector
 from app.collectors.mock import MockCollector
+from app.collectors.tikomni import TikOmniBudgetExceeded, TikOmniClient, TikOmniDouyinCollector
 
 __all__ = [
     "CollectorConfigurationError",
@@ -25,5 +26,8 @@ __all__ = [
     "CreatorProfile",
     "DouyinPublicWebCollector",
     "MockCollector",
+    "TikOmniBudgetExceeded",
+    "TikOmniClient",
+    "TikOmniDouyinCollector",
     "get_collector",
 ]

@@ -60,7 +60,7 @@ def sync_content_posts(
             if profile.published_at is not None:
                 post.published_at = profile.published_at
 
-        if profile.metrics_status != "success":
+        if profile.metrics_status not in {"success", "partial"}:
             continue
         post.latest_like_count = max(previous_likes, profile.like_count)
         post.latest_comment_count = max(post.latest_comment_count, profile.comment_count)
@@ -121,12 +121,13 @@ def list_posts(
         .where(*filters)
     )
     total = db.scalar(count_query) or 0
+    sort_time = func.coalesce(ContentPost.published_at, ContentPost.first_discovered_at)
     query = (
         select(ContentPost)
         .join(CreatorAccount, ContentPost.creator_id == CreatorAccount.id)
         .options(selectinload(ContentPost.creator))
         .where(*filters)
-        .order_by(ContentPost.published_at.desc(), ContentPost.id.desc())
+        .order_by(ContentPost.first_discovered_at.desc(), sort_time.desc(), ContentPost.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )

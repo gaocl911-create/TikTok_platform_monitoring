@@ -7,7 +7,7 @@ import { useRouter } from 'vue-router'
 import CreatorFormDialog from '../components/CreatorFormDialog.vue'
 import { useCreatorStore } from '../stores/creators'
 import type { Creator, CreatorPayload, MonitoringStatus, Platform } from '../types/creator'
-import { collectorLabel, qualityLabel } from '../utils/collector'
+import { collectorLabel, creatorQualityLabel } from '../utils/collector'
 import { formatApiDateTime } from '../utils/datetime'
 
 const store = useCreatorStore()
@@ -32,6 +32,10 @@ const query = reactive<{
 
 function formatNumber(value: number) {
   return value.toLocaleString('zh-CN')
+}
+
+function displayAccountId(creator: Creator) {
+  return creator.platform_display_id || creator.platform_account_id
 }
 
 function formatTime(value: string | null) {
@@ -65,6 +69,7 @@ async function handleSubmit(payload: CreatorPayload) {
       await store.updateCreator(editingCreator.value.id, {
         nickname: payload.nickname,
         profile_url: payload.profile_url,
+        platform_display_id: payload.platform_display_id,
         group_name: payload.group_name,
         tags: payload.tags,
         priority: payload.priority,
@@ -73,12 +78,8 @@ async function handleSubmit(payload: CreatorPayload) {
       })
       ElMessage.success('账号配置已更新')
     } else {
-      const created = await store.createCreator(payload)
-      if (created.data_quality_status === 'partial') {
-        ElMessage.warning('账号已添加，真实账号指标已采集；作品明细暂不可用')
-      } else {
-        ElMessage.success('账号已添加，并完成首次采集')
-      }
+      await store.createCreator(payload)
+      ElMessage.success('账号已添加，首次采集已在后台排队')
     }
     dialogVisible.value = false
     await load()
@@ -93,8 +94,10 @@ async function handleCollect(creator: Creator) {
     const result = await store.collectCreator(creator.id)
     if (!('run' in result)) {
       ElMessage.warning('首次采集失败，已加入自动重试队列')
+    } else if (result.run.result_summary?.content_status === 'budget_limited') {
+      ElMessage.warning('TikOmni 预算已达上限，本次已停止继续调用真实 API')
     } else if (result.run.status === 'partial') {
-      ElMessage.warning('真实账号指标已更新，作品明细暂不可用')
+      ElMessage.warning('真实账号指标已更新，部分作品指标暂不可用')
     } else {
       const delta = Number(result.run.result_summary?.follower_delta || 0)
       ElMessage.success(`采集完成，粉丝变化 +${delta}`)
@@ -169,7 +172,7 @@ onMounted(load)
               <span class="platform-dot" :class="row.platform"></span>
               <span>
                 <strong>{{ row.nickname }}</strong>
-                <small>{{ row.platform_account_id }}</small>
+                <small>{{ displayAccountId(row) }}</small>
               </span>
             </button>
           </template>
@@ -196,7 +199,7 @@ onMounted(load)
             <div class="source-cell">
               <strong>{{ collectorLabel(row.collector_type) }}</strong>
               <span class="quality-badge" :class="row.data_quality_status">
-                {{ qualityLabel(row.data_quality_status) }}
+                {{ creatorQualityLabel(row) }}
               </span>
             </div>
           </template>
@@ -278,7 +281,7 @@ onMounted(load)
             <span class="platform-dot" :class="creator.platform"></span>
             <div>
               <strong>{{ creator.nickname }}</strong>
-              <small>{{ creator.group_name || creator.platform_account_id }}</small>
+              <small>{{ creator.group_name || displayAccountId(creator) }}</small>
             </div>
           </div>
           <span class="status" :class="creator.monitoring_status">
@@ -288,7 +291,7 @@ onMounted(load)
         <div class="mobile-source-row">
           <span>{{ collectorLabel(creator.collector_type) }}</span>
           <span class="quality-badge" :class="creator.data_quality_status">
-            {{ qualityLabel(creator.data_quality_status) }}
+            {{ creatorQualityLabel(creator) }}
           </span>
         </div>
         <dl>

@@ -18,13 +18,19 @@ const likeDelta = computed(() => {
 })
 
 function formatNumber(value: number) {
-  if (props.post?.metrics_status !== 'success') return '--'
+  if (props.post?.metrics_status === 'unavailable') return '--'
   return value.toLocaleString('zh-CN')
 }
 
 function formatDelta() {
-  if (props.post?.metrics_status !== 'success') return '--'
+  if (props.post?.metrics_status === 'unavailable') return '--'
   return `+${likeDelta.value.toLocaleString('zh-CN')}`
+}
+
+function sourceLabel(post: ContentPost) {
+  if (post.data_source === 'mock') return '小红书待接入'
+  if (post.data_source === 'tikomni_douyin') return '抖音真实内容'
+  return '真实公开内容'
 }
 
 function formatTime(value: string) {
@@ -44,7 +50,7 @@ function formatTime(value: string) {
             <span class="platform-label">
               {{ post.creator.platform === 'douyin' ? '抖音' : '小红书' }} ·
               {{ post.creator.nickname }} ·
-              {{ post.data_source === 'mock' ? '模拟内容' : '真实公开内容' }}
+              {{ sourceLabel(post) }}
             </span>
             <h2>{{ post.title }}</h2>
             <p>{{ post.summary }}</p>

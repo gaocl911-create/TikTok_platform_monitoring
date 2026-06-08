@@ -309,6 +309,12 @@ button {
   background: #ecfdf5;
 }
 
+.quality-badge.tikomni {
+  border-color: #8dd8cf;
+  color: #00746b;
+  background: #e9fbf8;
+}
+
 .quality-badge.partial,
 .quality-badge.pending {
   border-color: #f2cf75;
