@@ -35,7 +35,7 @@ const form = reactive<CreatorPayload>({
   tags: [],
   priority: 'normal',
   monitor_interval_minutes: 30,
-  collector_type: 'tikomni_douyin',
+  collector_type: 'tikhub_douyin',
   follower_count: 0,
   following_count: 0,
   total_like_count: 0,
@@ -92,7 +92,7 @@ watch(
       tags: creator?.tags || [],
       priority: creator?.priority || 'normal',
       monitor_interval_minutes: creator?.monitor_interval_minutes || 30,
-      collector_type: creator?.collector_type || 'tikomni_douyin',
+      collector_type: creator?.collector_type || 'tikhub_douyin',
       follower_count: creator?.follower_count || 0,
       following_count: creator?.following_count || 0,
       total_like_count: creator?.total_like_count || 0,
@@ -100,7 +100,7 @@ watch(
       profile_resolved: false,
     })
     if (!creator && form.platform === 'douyin') {
-      form.collector_type = 'tikomni_douyin'
+      form.collector_type = 'tikhub_douyin'
     }
     resolvedProfile.value = null
     formRef.value?.clearValidate()
@@ -111,7 +111,7 @@ watch(
 watch(
   () => form.platform,
   (platform) => {
-    form.collector_type = platform === 'douyin' ? 'tikomni_douyin' : 'mock'
+    form.collector_type = platform === 'douyin' ? 'tikhub_douyin' : 'mock'
     resolvedProfile.value = null
     formRef.value?.clearValidate()
   },
@@ -134,7 +134,7 @@ function applyResolvedProfile(profile: CreatorProfileResolveResult) {
   form.following_count = profile.following_count
   form.total_like_count = profile.total_like_count
   form.content_count = profile.content_count
-  form.collector_type = 'tikomni_douyin'
+  form.collector_type = profile.collector_type
   form.profile_resolved = true
   resolvedProfile.value = profile
 }
@@ -175,7 +175,7 @@ async function handleSubmit() {
   if (!isEditing.value && !form.profile_resolved && resolveInputValue.value) {
     await handleResolveProfile()
   }
-  form.collector_type = 'tikomni_douyin'
+  form.collector_type = form.platform === 'douyin' ? form.collector_type || 'tikhub_douyin' : 'mock'
   form.profile_url = normalizeProfileUrl(form.profile_url)
   await formRef.value?.validate()
   emit('submit', { ...form, tags: [...form.tags] })

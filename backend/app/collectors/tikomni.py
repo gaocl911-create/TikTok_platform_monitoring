@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -698,7 +698,10 @@ def _map_content_profile(
         _find_string(merged_sources, ("desc", "title", "caption", "share_title"))
         or f"{creator.nickname} content {aweme_id[-6:]}"
     )
-    summary = _find_string(merged_sources, ("desc", "caption", "share_desc"))
+    summary = _dedupe_summary(
+        title,
+        _find_string(merged_sources, ("desc", "caption", "share_desc")),
+    )
     content_url = (
         _find_string(merged_sources, ("share_url", "url", "content_url"))
         or f"https://www.douyin.com/video/{aweme_id}"
@@ -794,7 +797,7 @@ def _map_tracked_content_profile(
     return ContentProfile(
         platform_content_id=tracked_post["platform_content_id"],
         title=tracked_post["title"],
-        summary=tracked_post.get("summary"),
+        summary=_dedupe_summary(tracked_post["title"], tracked_post.get("summary")),
         content_type=tracked_post["content_type"],
         content_url=tracked_post["content_url"],
         cover_url=tracked_post.get("cover_url"),
@@ -974,6 +977,26 @@ def _find_string(data: Any, keys: tuple[str, ...]) -> str | None:
     return None
 
 
+def _normalize_text_for_compare(value: str | None) -> str:
+    return " ".join((value or "").split())
+
+
+def _dedupe_summary(title: str, summary: str | None) -> str | None:
+    if not summary:
+        return None
+    title_text = _normalize_text_for_compare(title)
+    summary_text = _normalize_text_for_compare(summary)
+    if not summary_text:
+        return None
+    if title_text and (
+        title_text == summary_text
+        or summary_text.startswith(title_text)
+        or title_text.startswith(summary_text)
+    ):
+        return None
+    return summary
+
+
 def _find_int(data: Any, keys: tuple[str, ...], *, default: int = 0) -> int:
     value, present = _find_int_with_presence(data, keys)
     return value if present else default
@@ -1023,11 +1046,13 @@ def _find_datetime(data: Any, keys: tuple[str, ...]) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value
+        if value.tzinfo is None:
+            return value
+        return value.astimezone(UTC).replace(tzinfo=None)
     if isinstance(value, int | float):
         timestamp = value / 1000 if value > 10_000_000_000 else value
         try:
-            return datetime.fromtimestamp(timestamp)
+            return datetime.fromtimestamp(timestamp, UTC).replace(tzinfo=None)
         except (OSError, ValueError):
             return None
     if isinstance(value, str):
@@ -1038,7 +1063,10 @@ def _find_datetime(data: Any, keys: tuple[str, ...]) -> datetime | None:
         if parsed_int and parsed_int > 1_000_000_000:
             return _find_datetime({"value": parsed_int}, ("value",))
         try:
-            return datetime.fromisoformat(stripped.replace("Z", "+00:00")).replace(tzinfo=None)
+            parsed = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+            return parsed
         except ValueError:
             return None
     return None

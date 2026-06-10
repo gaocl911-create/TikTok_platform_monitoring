@@ -6,7 +6,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.collectors import CollectorConfigurationError, TikOmniDouyinCollector, get_collector
+from app.collectors import (
+    CollectorConfigurationError,
+    TikHubDouyinCollector,
+    get_collector,
+)
+from app.core.config import settings
 from app.models.base import utc_now
 from app.models.collection_run import CollectionRun
 from app.models.content_post import ContentPost
@@ -27,6 +32,51 @@ class CreatorAlreadyExistsError(Exception):
 
 
 MAX_BASELINE_CONTENT_IDS = 500
+BASELINE_COLLECTOR_TYPES = {
+    "douyin_public_web",
+    "tikhub_douyin",
+}
+
+
+def _needs_content_baseline(
+    *,
+    monitor_scope: str,
+    collector_type: str,
+    baseline_content_ids: list[str] | None,
+) -> bool:
+    return (
+        monitor_scope == "creator_collection"
+        and collector_type in BASELINE_COLLECTOR_TYPES
+        and not baseline_content_ids
+    )
+
+
+def _next_collect_at_after_profile_prefill(
+    payload: CreatorCreate,
+    now: datetime,
+) -> datetime:
+    if _needs_content_baseline(
+        monitor_scope=payload.monitor_scope,
+        collector_type=payload.collector_type,
+        baseline_content_ids=[],
+    ):
+        return now
+    return now + timedelta(minutes=payload.monitor_interval_minutes)
+
+
+def _next_collect_at_after_run(
+    creator: CreatorAccount,
+    *,
+    started_at: datetime,
+    include_content: bool,
+) -> datetime:
+    if not include_content and _needs_content_baseline(
+        monitor_scope=creator.monitor_scope,
+        collector_type=creator.collector_type,
+        baseline_content_ids=creator.baseline_content_ids,
+    ):
+        return started_at
+    return started_at + timedelta(minutes=creator.monitor_interval_minutes)
 
 
 @dataclass(slots=True)
@@ -66,7 +116,7 @@ class _CreatorCollectionContext:
     baseline_content_ids: list[str]
     known_content_ids: list[str]
     tracked_content_posts: list[_TrackedContentContext]
-    tikomni_spent_today_cny: float = 0
+    tikhub_spent_today_usd: float = 0
 
 
 @dataclass(slots=True)
@@ -119,10 +169,10 @@ def _collection_context(
     )
 
 
-def _tikomni_spent_today_cny(db: Session, started_at) -> float:
+def _tikhub_spent_today_usd(db: Session, started_at) -> float:
     day_start = started_at.replace(hour=0, minute=0, second=0, microsecond=0)
     query = select(CollectionRun.result_summary).where(
-        CollectionRun.collector_type == "tikomni_douyin",
+        CollectionRun.collector_type == "tikhub_douyin",
         CollectionRun.started_at >= day_start,
     )
     total = 0.0
@@ -130,7 +180,7 @@ def _tikomni_spent_today_cny(db: Session, started_at) -> float:
         if not isinstance(summary, dict):
             continue
         try:
-            total += float(summary.get("tikomni_estimated_cost_cny") or 0)
+            total += float(summary.get("tikhub_estimated_cost_usd") or 0)
         except (TypeError, ValueError):
             continue
     return total
@@ -216,7 +266,7 @@ def resolve_creator_profile(db: Session, *, platform: str, input_value: str) -> 
         bio=None,
         verified_info=None,
         location=None,
-        collector_type="tikomni_douyin",
+        collector_type="tikhub_douyin",
         follower_count=0,
         following_count=0,
         total_like_count=0,
@@ -226,9 +276,9 @@ def resolve_creator_profile(db: Session, *, platform: str, input_value: str) -> 
         baseline_content_ids=[],
         known_content_ids=[],
         tracked_content_posts=[],
-        tikomni_spent_today_cny=_tikomni_spent_today_cny(db, started_at),
+        tikhub_spent_today_usd=_tikhub_spent_today_usd(db, started_at),
     )
-    collector = TikOmniDouyinCollector(spent_today_cny=context.tikomni_spent_today_cny)
+    collector = TikHubDouyinCollector(spent_today_usd=context.tikhub_spent_today_usd)
     profile = collector.fetch_creator_profile(context)
     sec_user_id = getattr(collector, "_sec_user_id", None)
     public_account_id = getattr(collector, "_public_account_id", None)
@@ -277,7 +327,7 @@ def create_creator(db: Session, payload: CreatorCreate) -> CreatorAccount:
         last_content_status="pending",
         last_collected_at=now if payload.profile_resolved else None,
         next_collect_at=(
-            now + timedelta(minutes=payload.monitor_interval_minutes)
+            _next_collect_at_after_profile_prefill(payload, now)
             if payload.profile_resolved
             else now + timedelta(minutes=1)
         ),
@@ -351,7 +401,10 @@ def update_creator(db: Session, creator: CreatorAccount, payload: CreatorUpdate)
     updates = payload.model_dump(exclude_unset=True)
     collector_type = updates.get("collector_type")
     previous_collector_type = creator.collector_type
-    if collector_type in {"douyin_public_web", "tikomni_douyin"} and creator.platform != "douyin":
+    if (
+        collector_type in {"douyin_public_web", "tikhub_douyin"}
+        and creator.platform != "douyin"
+    ):
         raise CollectorConfigurationError("抖音真实采集器只能用于抖音账号")
 
     for field, value in updates.items():
@@ -392,6 +445,58 @@ def _duration_ms(started_at, finished_at) -> int:
     return max(0, round((finished_at - started_at).total_seconds() * 1000))
 
 
+def _single_content_profile_missing(context: _CreatorCollectionContext) -> bool:
+    return context.follower_count <= 0 or context.content_count <= 0
+
+
+def _single_content_profile_recently_fetched(
+    db: Session,
+    creator_id: int,
+    *,
+    started_at: datetime,
+) -> bool:
+    interval_hours = settings.single_content_profile_refresh_interval_hours
+    if interval_hours <= 0:
+        return False
+    cutoff = started_at - timedelta(hours=interval_hours)
+    query = (
+        select(CollectionRun)
+        .where(
+            CollectionRun.creator_id == creator_id,
+            CollectionRun.collector_type.in_(["tikhub_douyin"]),
+            CollectionRun.status.in_(["success", "partial"]),
+            CollectionRun.started_at >= cutoff,
+        )
+        .order_by(CollectionRun.started_at.desc())
+        .limit(100)
+    )
+    for run in db.scalars(query).all():
+        summary = run.result_summary or {}
+        if summary.get("creator_profile_fetch_skipped") is False:
+            return True
+    return False
+
+
+def _should_fetch_creator_profile_for_run(
+    db: Session,
+    context: _CreatorCollectionContext,
+    *,
+    include_content: bool,
+    started_at: datetime,
+) -> bool:
+    if not include_content:
+        return True
+    if context.monitor_scope != "single_content":
+        return True
+    if _single_content_profile_missing(context):
+        return True
+    return not _single_content_profile_recently_fetched(
+        db,
+        context.id,
+        started_at=started_at,
+    )
+
+
 def collect_creator(
     db: Session,
     creator: CreatorAccount,
@@ -407,10 +512,10 @@ def collect_creator(
         known_content_ids=_known_content_ids(db, creator),
         tracked_content_posts=_tracked_content_contexts(db, creator),
     )
-    if context.collector_type == "tikomni_douyin":
+    if context.collector_type == "tikhub_douyin":
         context = replace(
             context,
-            tikomni_spent_today_cny=_tikomni_spent_today_cny(db, started_at),
+            tikhub_spent_today_usd=_tikhub_spent_today_usd(db, started_at),
         )
     run = CollectionRun(
         creator_id=creator_id,
@@ -434,7 +539,13 @@ def collect_creator(
     collector = None
     try:
         collector = get_collector(context)
-        profile_fetch_skipped = include_content and context.monitor_scope == "single_content"
+        should_fetch_profile = _should_fetch_creator_profile_for_run(
+            db,
+            context,
+            include_content=include_content,
+            started_at=started_at,
+        )
+        profile_fetch_skipped = not should_fetch_profile
         if profile_fetch_skipped:
             profile = SimpleNamespace(
                 nickname=context.nickname,
@@ -490,7 +601,11 @@ def collect_creator(
         creator.total_like_count = profile.total_like_count
         creator.content_count = profile.content_count
         creator.last_collected_at = started_at
-        creator.next_collect_at = started_at + timedelta(minutes=creator.monitor_interval_minutes)
+        creator.next_collect_at = _next_collect_at_after_run(
+            creator,
+            started_at=started_at,
+            include_content=include_content,
+        )
         creator.consecutive_failures = 0
 
         snapshot = CreatorSnapshot(
@@ -562,9 +677,12 @@ def collect_creator(
         )
         run.finished_at = utc_now()
         run.duration_ms = _duration_ms(started_at, run.finished_at)
+        content_list_fetch_skipped = include_content and context.monitor_scope == "single_content"
         collection_scope = (
             "single_content_metrics"
-            if profile_fetch_skipped
+            if content_list_fetch_skipped and profile_fetch_skipped
+            else "single_content_profile_and_metrics"
+            if content_list_fetch_skipped
             else "full"
             if include_content
             else "profile"
@@ -588,7 +706,7 @@ def collect_creator(
             "content_baseline_created": baseline_created,
             "content_baseline_size": len(creator.baseline_content_ids or []),
             "creator_profile_fetch_skipped": profile_fetch_skipped,
-            "content_list_fetch_skipped": profile_fetch_skipped,
+            "content_list_fetch_skipped": content_list_fetch_skipped,
             "expensive_content_fetch_skipped": include_content
             and content_status in {"baseline_created", "no_new_content"},
         }

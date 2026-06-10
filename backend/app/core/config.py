@@ -27,12 +27,15 @@ class Settings(BaseSettings):
     collection_retry_max_retries: int = 3
     collection_retry_base_delay_seconds: int = 30
     collection_failure_alert_threshold: int = 3
-    tikomni_enabled: bool = True
-    tikomni_api_base_url: str = "https://api.tikomni.com"
-    tikomni_api_token: str | None = None
-    tikomni_timeout_seconds: int = 60
-    tikomni_daily_budget_cny: float = 20
-    tikomni_estimated_unit_price_cny: float = 0.008
+    tikhub_enabled: bool = True
+    tikhub_api_base_url: str = "https://api.tikhub.dev"
+    tikhub_api_token: str | None = None
+    tikhub_timeout_seconds: int = 15
+    tikhub_daily_budget_usd: float = 5
+    tikhub_estimated_unit_price_usd: float = 0.001
+    douyin_single_work_provider: str = "tikhub"
+    douyin_profile_provider: str = "tikhub"
+    single_content_profile_refresh_interval_hours: int = 24
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

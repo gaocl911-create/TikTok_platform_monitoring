@@ -8,6 +8,7 @@ import ContentDetailDrawer from '../components/ContentDetailDrawer.vue'
 import type { Platform } from '../types/creator'
 import type { ContentLinkResolveResponse, ContentPost, ContentSnapshot } from '../types/monitoring'
 import { formatApiDateTime } from '../utils/datetime'
+import { uniqueSummary } from '../utils/text'
 
 const loading = ref(false)
 const items = ref<ContentPost[]>([])
@@ -74,15 +75,23 @@ function formatPreviewMetric(value: number, status: ContentLinkResolveResponse['
   return status === 'unavailable' ? '--' : formatNumber(value)
 }
 
+function postSummary(post: ContentPost) {
+  return uniqueSummary(post.title, post.summary)
+}
+
+function previewSummary(preview: ContentLinkResolveResponse) {
+  return uniqueSummary(preview.content.title, preview.content.summary)
+}
+
 function sourceBadgeClass(post: ContentPost) {
   if (post.data_source === 'mock') return 'mock'
-  if (post.data_source === 'tikomni_douyin') return 'tikomni'
+  if (post.data_source === 'tikhub_douyin') return 'tikhub'
   return 'verified'
 }
 
 function sourceBadgeLabel(post: ContentPost) {
   if (post.data_source === 'mock') return '小红书待接入'
-  if (post.data_source === 'tikomni_douyin') return '抖音真实内容'
+  if (post.data_source === 'tikhub_douyin') return 'TikHub 真实内容'
   return '真实公开内容'
 }
 
@@ -231,7 +240,7 @@ onMounted(load)
             </span>
           </div>
           <h3>{{ post.title }}</h3>
-          <p>{{ post.summary || '暂无公开摘要' }}</p>
+          <p v-if="postSummary(post)">{{ postSummary(post) }}</p>
           <dl class="engagement-row">
             <div><dt>点赞</dt><dd>{{ formatMetric(post, post.latest_like_count) }}</dd></div>
             <div><dt>评论</dt><dd>{{ formatMetric(post, post.latest_comment_count) }}</dd></div>
@@ -342,7 +351,7 @@ onMounted(load)
           </div>
 
           <h3>{{ linkPreview.content.title }}</h3>
-          <p>{{ linkPreview.content.summary || '暂无公开摘要' }}</p>
+          <p v-if="previewSummary(linkPreview)">{{ previewSummary(linkPreview) }}</p>
 
           <dl class="work-preview-metrics">
             <div>

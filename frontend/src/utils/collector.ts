@@ -3,7 +3,7 @@ import type { CollectorType, Creator, DataQualityStatus } from '../types/creator
 const collectorLabels: Record<CollectorType, string> = {
   mock: '小红书待接入',
   douyin_public_web: '抖音公开主页',
-  tikomni_douyin: '抖音真实数据',
+  tikhub_douyin: 'TikHub 抖音',
 }
 
 const qualityLabels: Record<DataQualityStatus, string> = {
@@ -45,10 +45,10 @@ export function qualityDescription(creator: Creator) {
     return '本次已检查作品列表，未发现新作品。'
   }
   if (creator.last_content_status === 'metrics_refreshed') {
-    return '本次未发现新作品，已刷新已跟踪作品的点赞、评论、收藏、分享指标。'
+    return '本次已刷新已跟踪作品的点赞、评论、收藏、分享指标。'
   }
   if (creator.last_content_status === 'budget_limited') {
-    return 'TikOmni 每日预算已达上限，本次已停止继续调用真实 API。'
+    return '真实 API 每日预算已达上限，本次已停止继续调用。'
   }
   if (creator.last_content_status === 'pending' && creator.data_quality_status === 'partial') {
     return '作者主页信息已真实采集，作品监控还未完成第一次内容采集。'

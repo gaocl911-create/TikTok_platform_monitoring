@@ -22,7 +22,7 @@ export interface ContentPost {
   latest_collect_count: number
   latest_share_count: number
   status: string
-  data_source: 'mock' | 'douyin_public_web' | 'tikomni_douyin'
+  data_source: 'mock' | 'douyin_public_web' | 'tikhub_douyin'
   metrics_status: 'success' | 'partial' | 'unavailable'
   creator: ContentCreator
 }
@@ -37,6 +37,7 @@ export interface ContentPostListResponse {
 export interface ContentLinkResolveRequest {
   platform: Platform
   input_value: string
+  data_provider?: 'tikhub' | null
 }
 
 export interface ContentLinkCreateRequest extends ContentLinkResolveRequest {

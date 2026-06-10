@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /d d:\\\\workspace\\\\TikTok_platform_monitoring)",
+      "Bash(dir /b)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_content_linking.py tests/test_tikhub.py -v)",
+      "Bash(cd /d/workspace/TikTok_platform_monitoring/backend && find . -path ./.venv -prune -o -name '*.py' -print | head -80)",
+      "Read(//d/d/workspace/TikTok_platform_monitoring/**)"
+    ]
+  }
+}

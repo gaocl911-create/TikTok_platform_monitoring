@@ -9,7 +9,7 @@ from app.utils.profile_urls import normalize_profile_url
 Platform = Literal["douyin", "xiaohongshu"]
 Priority = Literal["high", "normal", "low"]
 MonitoringStatus = Literal["active", "paused"]
-CollectorType = Literal["mock", "douyin_public_web", "tikomni_douyin"]
+CollectorType = Literal["mock", "douyin_public_web", "tikhub_douyin"]
 MonitorScope = Literal["creator_collection", "single_content"]
 
 
@@ -43,7 +43,7 @@ class CreatorCreate(BaseModel):
     @model_validator(mode="after")
     def validate_collector_type(self) -> Self:
         if (
-            self.collector_type in {"douyin_public_web", "tikomni_douyin"}
+            self.collector_type in {"douyin_public_web", "tikhub_douyin"}
             and self.platform != "douyin"
         ):
             raise ValueError("抖音真实采集器只能用于抖音账号")

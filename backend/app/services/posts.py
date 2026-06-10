@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.collectors import (
     CollectorConfigurationError,
     ContentProfile,
-    TikOmniDouyinWorkResolver,
-    TikOmniResolvedCreator,
-    TikOmniResolvedWork,
+    TikHubDouyinWorkResolver,
+    TikHubResolvedCreator,
+    TikHubResolvedWork,
 )
 from app.core.config import settings
 from app.models.base import utc_now
@@ -45,12 +45,14 @@ def resolve_content_link(
     *,
     platform: str,
     input_value: str,
-) -> tuple[TikOmniResolvedWork, dict, list[str]]:
+    data_provider: str | None = None,
+) -> tuple[TikHubResolvedWork, dict, list[str]]:
     if platform != "douyin":
         raise CollectorConfigurationError("单作品链接添加第一版只支持抖音")
     started_at = utc_now()
-    resolver = TikOmniDouyinWorkResolver(
-        spent_today_cny=_tikomni_spent_today_cny(db, started_at),
+    provider = _normalize_single_work_provider(data_provider)
+    resolver = TikHubDouyinWorkResolver(
+        spent_today_usd=_tikhub_spent_today_usd(db, started_at),
     )
     resolved = resolver.resolve(input_value)
     return resolved, resolver.usage_summary(), list(resolver.warnings)
@@ -60,15 +62,18 @@ def cache_resolved_content_link(
     *,
     platform: str,
     input_value: str,
-    resolved: TikOmniResolvedWork,
+    data_provider: str | None,
+    resolved: TikHubResolvedWork,
     usage_summary: dict,
     warnings: list[str],
 ) -> str | None:
     token = secrets.token_urlsafe(24)
+    provider = _normalize_single_work_provider(data_provider)
     payload = json.dumps(
         {
             "platform": platform,
-            "input_hash": _cache_input_hash(platform, input_value),
+            "data_provider": provider,
+            "input_hash": _cache_input_hash(platform, input_value, provider),
             "resolved": _resolved_work_to_cache_payload(resolved),
             "usage_summary": usage_summary,
             "warnings": warnings,
@@ -98,11 +103,14 @@ def add_content_from_link(
     tags: list[str] | None = None,
     monitor_interval_minutes: int = 30,
     resolve_token: str | None = None,
+    data_provider: str | None = None,
 ) -> LinkedContentResult:
     started_at = utc_now()
+    provider = _normalize_single_work_provider(data_provider)
     cached = _load_cached_resolved_content_link(
         platform=platform,
         input_value=input_value,
+        data_provider=provider,
         resolve_token=resolve_token,
     )
     if cached is None:
@@ -110,21 +118,25 @@ def add_content_from_link(
             db,
             platform=platform,
             input_value=input_value,
+            data_provider=provider,
         )
         cache_hit = False
+        consumed_resolve_token = None
     else:
         resolved, usage_summary, warnings = cached
         usage_summary = {
             **usage_summary,
-            "tikomni_cache_hit": True,
-            "tikomni_request_count": 0,
-            "tikomni_estimated_cost_cny": 0,
-            "tikomni_endpoints": [],
+            f"{provider}_cache_hit": True,
+            "resolve_phase_cost_attributed": True,
         }
         cache_hit = True
+        consumed_resolve_token = resolve_token
+    collector_type = _collector_type_for_provider(provider)
     creator, creator_created = _get_or_create_creator_for_work(
         db,
         resolved,
+        collector_type=collector_type,
+        collector_version=_collector_version_for_provider(provider),
         creator_id=creator_id,
         group_name=group_name,
         tags=tags or [],
@@ -144,7 +156,7 @@ def add_content_from_link(
         creator,
         [resolved.content],
         captured_at=started_at,
-        data_source="tikomni_douyin",
+        data_source=collector_type,
     )
 
     creator.baseline_content_ids = _merge_content_ids(
@@ -174,11 +186,12 @@ def add_content_from_link(
         task_type="single_work_add",
         status="success",
         trigger_source="manual",
-        collector_type="tikomni_douyin",
+        collector_type=collector_type,
         started_at=started_at,
         finished_at=utc_now(),
         result_summary={
-            "collector_type": "tikomni_douyin",
+            "collector_type": collector_type,
+            "data_provider": provider,
             "collection_scope": "single_work",
             "content_status": "success",
             "platform_content_id": resolved.content.platform_content_id,
@@ -187,12 +200,16 @@ def add_content_from_link(
             "content_snapshot_count": len(snapshot_results),
             "warnings": warnings,
             "resolve_cache_hit": cache_hit,
+            "creator_profile_fetch_skipped": False,
+            "content_list_fetch_skipped": True,
             **usage_summary,
         },
     )
     run.duration_ms = max(0, round((run.finished_at - run.started_at).total_seconds() * 1000))
     db.add(run)
     db.commit()
+    if consumed_resolve_token:
+        _consume_cached_resolved_content_link(consumed_resolve_token)
     db.refresh(creator)
     db.refresh(post)
     db.refresh(run)
@@ -219,8 +236,9 @@ def _resolve_cache_key(token: str) -> str:
     return f"{_RESOLVE_CACHE_PREFIX}:{token}"
 
 
-def _cache_input_hash(platform: str, input_value: str) -> str:
-    normalized = f"{platform}:{input_value.strip()}"
+def _cache_input_hash(platform: str, input_value: str, data_provider: str | None = None) -> str:
+    provider = _normalize_single_work_provider(data_provider)
+    normalized = f"{provider}:{platform}:{input_value.strip()}"
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
@@ -243,12 +261,23 @@ def _read_local_cache(token: str) -> str | None:
     return payload
 
 
+def _consume_cached_resolved_content_link(token: str) -> None:
+    _LOCAL_RESOLVE_CACHE.pop(token, None)
+    try:
+        client = _resolve_cache_client()
+        client.delete(_resolve_cache_key(token))
+        client.close()
+    except RedisError:
+        return
+
+
 def _load_cached_resolved_content_link(
     *,
     platform: str,
     input_value: str,
+    data_provider: str,
     resolve_token: str | None,
-) -> tuple[TikOmniResolvedWork, dict, list[str]] | None:
+) -> tuple[TikHubResolvedWork, dict, list[str]] | None:
     if not resolve_token:
         return None
     payload_text = _read_local_cache(resolve_token)
@@ -268,7 +297,10 @@ def _load_cached_resolved_content_link(
         return None
     if payload.get("platform") != platform:
         return None
-    if payload.get("input_hash") != _cache_input_hash(platform, input_value):
+    provider = _normalize_single_work_provider(data_provider)
+    if payload.get("data_provider", "tikhub") != provider:
+        return None
+    if payload.get("input_hash") != _cache_input_hash(platform, input_value, provider):
         return None
     return (
         _resolved_work_from_cache_payload(payload["resolved"]),
@@ -277,7 +309,7 @@ def _load_cached_resolved_content_link(
     )
 
 
-def _resolved_work_to_cache_payload(resolved: TikOmniResolvedWork) -> dict:
+def _resolved_work_to_cache_payload(resolved: TikHubResolvedWork) -> dict:
     return {
         "creator": {
             "platform_account_id": resolved.creator.platform_account_id,
@@ -313,10 +345,10 @@ def _resolved_work_to_cache_payload(resolved: TikOmniResolvedWork) -> dict:
     }
 
 
-def _resolved_work_from_cache_payload(payload: dict) -> TikOmniResolvedWork:
+def _resolved_work_from_cache_payload(payload: dict) -> TikHubResolvedWork:
     creator = payload["creator"]
     content = payload["content"]
-    resolved_creator = TikOmniResolvedCreator(
+    resolved_creator = TikHubResolvedCreator(
         platform_account_id=creator["platform_account_id"],
         platform_display_id=creator.get("platform_display_id"),
         nickname=creator["nickname"],
@@ -345,7 +377,7 @@ def _resolved_work_from_cache_payload(payload: dict) -> TikOmniResolvedWork:
         metrics_status=content.get("metrics_status") or "success",
         raw_data=content.get("raw_data"),
     )
-    return TikOmniResolvedWork(
+    return TikHubResolvedWork(
         creator=resolved_creator,
         content=resolved_content,
         source_url=payload["source_url"],
@@ -366,10 +398,27 @@ def _datetime_from_cache_value(value: str | None) -> datetime | None:
     return parsed
 
 
-def _tikomni_spent_today_cny(db: Session, started_at: datetime) -> float:
+def _normalize_single_work_provider(data_provider: str | None = None) -> str:
+    provider = (data_provider or settings.douyin_single_work_provider or "tikhub").strip().lower()
+    if provider != "tikhub":
+        raise CollectorConfigurationError(f"当前只支持 TikHub 抖音作品数据源，不再调用旧平台: {provider}")
+    return provider
+
+
+def _collector_type_for_provider(provider: str) -> str:
+    _normalize_single_work_provider(provider)
+    return "tikhub_douyin"
+
+
+def _collector_version_for_provider(provider: str) -> str:
+    _normalize_single_work_provider(provider)
+    return "tikhub-douyin-single-work-v1"
+
+
+def _tikhub_spent_today_usd(db: Session, started_at: datetime) -> float:
     day_start = started_at.replace(hour=0, minute=0, second=0, microsecond=0)
     query = select(CollectionRun.result_summary).where(
-        CollectionRun.collector_type == "tikomni_douyin",
+        CollectionRun.collector_type == "tikhub_douyin",
         CollectionRun.started_at >= day_start,
     )
     total = 0.0
@@ -377,7 +426,7 @@ def _tikomni_spent_today_cny(db: Session, started_at: datetime) -> float:
         if not isinstance(summary, dict):
             continue
         try:
-            total += float(summary.get("tikomni_estimated_cost_cny") or 0)
+            total += float(summary.get("tikhub_estimated_cost_usd") or 0)
         except (TypeError, ValueError):
             continue
     return total
@@ -385,8 +434,10 @@ def _tikomni_spent_today_cny(db: Session, started_at: datetime) -> float:
 
 def _get_or_create_creator_for_work(
     db: Session,
-    resolved: TikOmniResolvedWork,
+    resolved: TikHubResolvedWork,
     *,
+    collector_type: str,
+    collector_version: str,
     creator_id: int | None,
     group_name: str | None,
     tags: list[str],
@@ -403,7 +454,7 @@ def _get_or_create_creator_for_work(
 
     creator = _find_creator_for_resolved_work(db, resolved)
     if creator is not None:
-        _merge_creator_profile_from_work(creator, resolved)
+        _merge_creator_profile_from_work(creator, resolved, collector_type=collector_type)
         return creator, False
 
     creator_info = resolved.creator
@@ -423,8 +474,8 @@ def _get_or_create_creator_for_work(
         monitor_interval_minutes=monitor_interval_minutes,
         monitor_scope="single_content",
         monitoring_status="active",
-        collector_type="tikomni_douyin",
-        collector_version="tikomni-douyin-single-work-v1",
+        collector_type=collector_type,
+        collector_version=collector_version,
         data_quality_status="verified",
         last_content_status="metrics_refreshed",
         follower_count=creator_info.follower_count,
@@ -455,7 +506,7 @@ def _get_or_create_creator_for_work(
 
 def _find_creator_for_resolved_work(
     db: Session,
-    resolved: TikOmniResolvedWork,
+    resolved: TikHubResolvedWork,
 ) -> CreatorAccount | None:
     creator_info = resolved.creator
     creator = db.scalar(
@@ -478,7 +529,9 @@ def _find_creator_for_resolved_work(
 
 def _merge_creator_profile_from_work(
     creator: CreatorAccount,
-    resolved: TikOmniResolvedWork,
+    resolved: TikHubResolvedWork,
+    *,
+    collector_type: str,
 ) -> None:
     creator_info = resolved.creator
     creator.platform_display_id = creator.platform_display_id or creator_info.platform_display_id
@@ -492,8 +545,8 @@ def _merge_creator_profile_from_work(
     creator.following_count = max(creator.following_count, creator_info.following_count)
     creator.total_like_count = max(creator.total_like_count, creator_info.total_like_count)
     creator.content_count = max(creator.content_count, creator_info.content_count)
-    if creator.collector_type != "tikomni_douyin":
-        creator.collector_type = "tikomni_douyin"
+    if creator.monitor_scope == "single_content" or creator.collector_type == "mock":
+        creator.collector_type = collector_type
 
 
 def _merge_content_ids(*groups: list[str] | tuple[str, ...] | None) -> list[str]:

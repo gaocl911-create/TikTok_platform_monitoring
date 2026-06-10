@@ -66,6 +66,7 @@ def resolve_post_link_endpoint(payload: ContentLinkResolveRequest, db: DbSession
             db,
             platform=payload.platform,
             input_value=payload.input_value,
+            data_provider=payload.data_provider,
         )
     except CollectorError as exc:
         raise HTTPException(
@@ -94,6 +95,7 @@ def resolve_post_link_endpoint(payload: ContentLinkResolveRequest, db: DbSession
     resolve_token = cache_resolved_content_link(
         platform=payload.platform,
         input_value=payload.input_value,
+        data_provider=payload.data_provider,
         resolved=resolved,
         usage_summary=_usage,
         warnings=warnings,
@@ -119,6 +121,7 @@ def add_post_from_link_endpoint(payload: ContentLinkCreateRequest, db: DbSession
             tags=payload.tags,
             monitor_interval_minutes=payload.monitor_interval_minutes,
             resolve_token=payload.resolve_token,
+            data_provider=payload.data_provider,
         )
     except CollectorError as exc:
         raise HTTPException(

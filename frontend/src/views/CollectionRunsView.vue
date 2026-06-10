@@ -11,7 +11,7 @@ const items = ref<CollectionRun[]>([])
 const total = ref(0)
 const query = reactive({
   status: '' as '' | 'success' | 'partial' | 'failed' | 'skipped',
-  collector_type: '' as '' | 'mock' | 'douyin_public_web' | 'tikomni_douyin',
+  collector_type: '' as '' | 'mock' | 'douyin_public_web' | 'tikhub_douyin',
   page: 1,
   page_size: 20,
 })
@@ -35,7 +35,7 @@ function triggerLabel(source: string) {
 }
 
 function sourceLabel(source: string | null) {
-  if (source === 'tikomni_douyin') return '抖音真实数据'
+  if (source === 'tikhub_douyin') return 'TikHub 抖音'
   if (source === 'douyin_public_web') return '抖音公开主页'
   if (source === 'mock') return '小红书待接入'
   return '未知'
@@ -106,7 +106,7 @@ onMounted(load)
         <el-option label="已跳过" value="skipped" />
       </el-select>
       <el-select v-model="query.collector_type" placeholder="全部数据来源" clearable @change="load">
-        <el-option label="抖音真实数据" value="tikomni_douyin" />
+        <el-option label="TikHub 抖音" value="tikhub_douyin" />
         <el-option label="抖音公开主页" value="douyin_public_web" />
         <el-option label="小红书待接入" value="mock" />
       </el-select>

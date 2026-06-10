@@ -48,6 +48,7 @@ class ContentPostListResponse(BaseModel):
 class ContentLinkResolveRequest(BaseModel):
     platform: Literal["douyin", "xiaohongshu"] = "douyin"
     input_value: str = Field(min_length=1, max_length=1000)
+    data_provider: Literal["tikhub"] | None = None
 
 
 class ContentLinkCreateRequest(ContentLinkResolveRequest):

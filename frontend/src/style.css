@@ -315,6 +315,12 @@ button {
   background: #e9fbf8;
 }
 
+.quality-badge.tikhub {
+  border-color: #97c6ff;
+  color: #175cd3;
+  background: #eff6ff;
+}
+
 .quality-badge.partial,
 .quality-badge.pending {
   border-color: #f2cf75;

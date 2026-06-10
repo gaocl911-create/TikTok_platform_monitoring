@@ -4,6 +4,7 @@ import { computed } from 'vue'
 
 import type { ContentPost, ContentSnapshot } from '../types/monitoring'
 import { formatApiDateTime } from '../utils/datetime'
+import { uniqueSummary } from '../utils/text'
 
 const visible = defineModel<boolean>({ required: true })
 const props = defineProps<{
@@ -29,12 +30,16 @@ function formatDelta() {
 
 function sourceLabel(post: ContentPost) {
   if (post.data_source === 'mock') return '小红书待接入'
-  if (post.data_source === 'tikomni_douyin') return '抖音真实内容'
+  if (post.data_source === 'tikhub_douyin') return 'TikHub 真实内容'
   return '真实公开内容'
 }
 
 function formatTime(value: string) {
   return formatApiDateTime(value)
+}
+
+function postSummary(post: ContentPost) {
+  return uniqueSummary(post.title, post.summary)
 }
 </script>
 
@@ -53,7 +58,7 @@ function formatTime(value: string) {
               {{ sourceLabel(post) }}
             </span>
             <h2>{{ post.title }}</h2>
-            <p>{{ post.summary }}</p>
+            <p v-if="postSummary(post)">{{ postSummary(post) }}</p>
           </div>
         </section>
 

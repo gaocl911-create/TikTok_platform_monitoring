@@ -95,7 +95,7 @@ async function handleCollect(creator: Creator) {
     if (!('run' in result)) {
       ElMessage.warning('首次采集失败，已加入自动重试队列')
     } else if (result.run.result_summary?.content_status === 'budget_limited') {
-      ElMessage.warning('TikOmni 预算已达上限，本次已停止继续调用真实 API')
+      ElMessage.warning('TikHub 预算已达上限，本次已停止继续调用真实 API')
     } else if (result.run.status === 'partial') {
       ElMessage.warning('真实账号指标已更新，部分作品指标暂不可用')
     } else {

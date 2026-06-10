@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from app.collectors.base import ContentProfile, CreatorProfile
 from app.core.database import get_db
 from app.main import app
+from app.models.collection_run import CollectionRun
 from app.models.content_post import ContentPost
 from app.models.content_snapshot import ContentSnapshot
 from app.services.creators import collect_creator, get_creator
@@ -160,7 +161,7 @@ def test_resolve_profile_endpoint_returns_prefill_payload(
             "following_count": 58,
             "total_like_count": 2125000,
             "content_count": 219,
-            "collector_type": "tikomni_douyin",
+            "collector_type": "tikhub_douyin",
             "sec_user_id": "MS4wLjABAAAA",
             "warnings": [],
         }
@@ -177,7 +178,7 @@ def test_resolve_profile_endpoint_returns_prefill_payload(
     assert body["nickname"] == "Resolved Creator"
     assert body["platform_display_id"] == "34867887966"
     assert body["follower_count"] == 414000
-    assert body["collector_type"] == "tikomni_douyin"
+    assert body["collector_type"] == "tikhub_douyin"
 
 
 def test_create_creator_persists_resolved_profile_without_queueing_initial_task(
@@ -202,7 +203,7 @@ def test_create_creator_persists_resolved_profile_without_queueing_initial_task(
             "avatar_url": "https://example.com/avatar.jpg",
             "bio": "Profile bio",
             "location": "Shandong",
-            "collector_type": "tikomni_douyin",
+            "collector_type": "tikhub_douyin",
             "follower_count": 111576,
             "following_count": 500,
             "total_like_count": 4974858,
@@ -219,6 +220,7 @@ def test_create_creator_persists_resolved_profile_without_queueing_initial_task(
     assert body["total_like_count"] == 4974858
     assert body["content_count"] == 94
     assert body["last_collected_at"].endswith("Z")
+    assert body["next_collect_at"] == body["last_collected_at"]
     assert body["data_quality_status"] == "partial"
 
     snapshots_response = client.get(f"/api/v1/creators/{body['id']}/snapshots")
@@ -257,7 +259,11 @@ def test_profile_only_collection_skips_content_fetch(
     monkeypatch.setattr("app.services.creators.get_collector", lambda creator: ProfileOnlyCollector())
     create_response = client.post(
         "/api/v1/creators",
-        json={**CREATOR_PAYLOAD, "platform_account_id": "profile-only-service"},
+        json={
+            **CREATOR_PAYLOAD,
+            "platform_account_id": "profile-only-service",
+            "collector_type": "douyin_public_web",
+        },
     )
     creator_id = create_response.json()["id"]
 
@@ -285,6 +291,7 @@ def test_profile_only_collection_skips_content_fetch(
     assert creator.follower_count == 1234
     assert creator.total_like_count == 7890
     assert creator.content_count == 12
+    assert creator.next_collect_at == creator.last_collected_at
     assert creator.last_content_status == "pending"
     assert creator.data_quality_status == "partial"
     assert snapshot.follower_count == 1234
@@ -299,7 +306,7 @@ def test_content_collection_establishes_baseline_without_importing_old_posts(
     monkeypatch,
 ) -> None:
     class BaselineCollector:
-        collector_type = "tikomni_douyin"
+        collector_type = "tikhub_douyin"
         version = "test-baseline-v1"
         content_status = "baseline_created"
         warnings = ["已建立作品基线，历史作品不会进入内容动态。"]
@@ -326,10 +333,10 @@ def test_content_collection_establishes_baseline_without_importing_old_posts(
 
         def usage_summary(self):
             return {
-                "tikomni_request_count": 2,
-                "tikomni_estimated_cost_cny": 0.003,
-                "tikomni_endpoints": ["profile", "list"],
-                "tikomni_budget_limited": False,
+                "tikhub_request_count": 2,
+                "tikhub_estimated_cost_usd": 0.003,
+                "tikhub_endpoints": ["profile", "list"],
+                "tikhub_budget_limited": False,
             }
 
     monkeypatch.setattr("app.services.creators.get_collector", lambda creator: BaselineCollector())
@@ -338,7 +345,7 @@ def test_content_collection_establishes_baseline_without_importing_old_posts(
         json={
             **CREATOR_PAYLOAD,
             "platform_account_id": "baseline-service",
-            "collector_type": "tikomni_douyin",
+            "collector_type": "tikhub_douyin",
         },
     )
     creator_id = create_response.json()["id"]
@@ -377,12 +384,135 @@ def test_content_collection_establishes_baseline_without_importing_old_posts(
     assert post_count == 0
 
 
+def test_creator_collection_imports_only_posts_after_baseline(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    stages = ["baseline", "new-post"]
+
+    class AfterBaselineCollector:
+        collector_type = "tikhub_douyin"
+        version = "test-after-baseline-v1"
+        content_status = "success"
+        warnings: list[str] = []
+        last_seen_content_ids: list[str] = []
+        new_content_ids: list[str] = []
+        refreshed_content_ids: list[str] = []
+        baseline_created = False
+
+        def fetch_creator_profile(self, creator):
+            return CreatorProfile(
+                nickname="after baseline creator",
+                avatar_url=None,
+                bio="profile bio",
+                verified_info=None,
+                location="Shandong",
+                follower_count=100,
+                following_count=5,
+                total_like_count=1000,
+                content_count=3,
+            )
+
+        def fetch_content_posts(self, creator):
+            stage = stages.pop(0)
+            if stage == "baseline":
+                assert creator.monitor_scope == "creator_collection"
+                assert creator.known_content_ids == []
+                self.last_seen_content_ids = ["old-aweme-1", "old-aweme-2"]
+                self.new_content_ids = []
+                self.baseline_created = True
+                self.content_status = "baseline_created"
+                return []
+
+            assert set(creator.known_content_ids) == {"old-aweme-1", "old-aweme-2"}
+            self.last_seen_content_ids = ["new-aweme-1", "old-aweme-1", "old-aweme-2"]
+            self.new_content_ids = ["new-aweme-1"]
+            self.content_status = "success"
+            return [
+                ContentProfile(
+                    platform_content_id="new-aweme-1",
+                    title="new post after baseline",
+                    summary=None,
+                    content_type="video",
+                    content_url="https://www.douyin.com/video/new-aweme-1",
+                    cover_url=None,
+                    published_at=None,
+                    like_count=10,
+                    comment_count=2,
+                    collect_count=3,
+                    share_count=1,
+                    metrics_status="success",
+                    raw_data={"stage": "after_baseline"},
+                )
+            ]
+
+        def usage_summary(self):
+            return {
+                "tikhub_request_count": 2,
+                "tikhub_estimated_cost_usd": 0.003,
+                "tikhub_endpoints": ["profile", "list"],
+                "tikhub_budget_limited": False,
+            }
+
+    monkeypatch.setattr("app.services.creators.get_collector", lambda creator: AfterBaselineCollector())
+    create_response = client.post(
+        "/api/v1/creators",
+        json={
+            **CREATOR_PAYLOAD,
+            "platform_account_id": "after-baseline-service",
+            "collector_type": "tikhub_douyin",
+        },
+    )
+    creator_id = create_response.json()["id"]
+
+    override = app.dependency_overrides[get_db]
+    db_gen = override()
+    db = next(db_gen)
+    try:
+        creator = get_creator(db, creator_id)
+        creator, _snapshot, first_run = collect_creator(
+            db,
+            creator,
+            trigger_source="scheduled",
+            include_content=True,
+        )
+        creator, _snapshot, second_run = collect_creator(
+            db,
+            creator,
+            trigger_source="scheduled",
+            include_content=True,
+        )
+        first_summary = first_run.result_summary
+        second_summary = second_run.result_summary
+        posts = db.scalars(
+            select(ContentPost).where(ContentPost.creator_id == creator_id)
+        ).all()
+        post_ids = [post.platform_content_id for post in posts]
+        baseline_ids = list(creator.baseline_content_ids or [])
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+    assert first_summary["content_status"] == "baseline_created"
+    assert first_summary["new_content_count"] == 0
+    assert second_summary["content_status"] == "success"
+    assert second_summary["new_content_count"] == 1
+    assert post_ids == ["new-aweme-1"]
+    assert set(baseline_ids) == {
+        "new-aweme-1",
+        "old-aweme-1",
+        "old-aweme-2",
+    }
+
+
 def test_content_collection_refreshes_tracked_post_snapshots(
     client: TestClient,
     monkeypatch,
 ) -> None:
     class MetricsRefreshCollector:
-        collector_type = "tikomni_douyin"
+        collector_type = "tikhub_douyin"
         version = "test-metrics-refresh-v1"
         content_status = "metrics_refreshed"
         warnings: list[str] = []
@@ -428,10 +558,10 @@ def test_content_collection_refreshes_tracked_post_snapshots(
 
         def usage_summary(self):
             return {
-                "tikomni_request_count": 2,
-                "tikomni_estimated_cost_cny": 0.003,
-                "tikomni_endpoints": ["profile", "statistics"],
-                "tikomni_budget_limited": False,
+                "tikhub_request_count": 2,
+                "tikhub_estimated_cost_usd": 0.003,
+                "tikhub_endpoints": ["profile", "statistics"],
+                "tikhub_budget_limited": False,
             }
 
     monkeypatch.setattr(
@@ -443,7 +573,7 @@ def test_content_collection_refreshes_tracked_post_snapshots(
         json={
             **CREATOR_PAYLOAD,
             "platform_account_id": "metrics-refresh-service",
-            "collector_type": "tikomni_douyin",
+            "collector_type": "tikhub_douyin",
         },
     )
     creator_id = create_response.json()["id"]
@@ -466,7 +596,7 @@ def test_content_collection_refreshes_tracked_post_snapshots(
                 latest_collect_count=2,
                 latest_share_count=1,
                 status="active",
-                data_source="tikomni_douyin",
+                data_source="tikhub_douyin",
                 metrics_status="success",
             )
         )
@@ -514,7 +644,7 @@ def test_single_content_collection_skips_creator_profile_fetch(
     monkeypatch,
 ) -> None:
     class SingleContentMetricsCollector:
-        collector_type = "tikomni_douyin"
+        collector_type = "tikhub_douyin"
         version = "test-single-content-v1"
         content_status = "metrics_refreshed"
         warnings: list[str] = []
@@ -551,10 +681,10 @@ def test_single_content_collection_skips_creator_profile_fetch(
 
         def usage_summary(self):
             return {
-                "tikomni_request_count": 1,
-                "tikomni_estimated_cost_cny": 0.0375,
-                "tikomni_endpoints": ["fetch_multi_video_statistics"],
-                "tikomni_budget_limited": False,
+                "tikhub_request_count": 1,
+                "tikhub_estimated_cost_usd": 0.0375,
+                "tikhub_endpoints": ["fetch_multi_video_statistics"],
+                "tikhub_budget_limited": False,
             }
 
     monkeypatch.setattr(
@@ -567,7 +697,7 @@ def test_single_content_collection_skips_creator_profile_fetch(
             **CREATOR_PAYLOAD,
             "platform_account_id": "single-content-service",
             "nickname": "single creator",
-            "collector_type": "tikomni_douyin",
+            "collector_type": "tikhub_douyin",
             "monitor_scope": "single_content",
             "follower_count": 99,
             "following_count": 8,
@@ -582,6 +712,19 @@ def test_single_content_collection_skips_creator_profile_fetch(
     db = next(db_gen)
     try:
         db.add(
+            CollectionRun(
+                creator_id=creator_id,
+                status="success",
+                trigger_source="scheduled",
+                collector_type="tikhub_douyin",
+                result_summary={
+                    "collection_scope": "single_content_profile_and_metrics",
+                    "creator_profile_fetch_skipped": False,
+                    "content_list_fetch_skipped": True,
+                },
+            )
+        )
+        db.add(
             ContentPost(
                 creator_id=creator_id,
                 platform_content_id="single-aweme",
@@ -595,7 +738,7 @@ def test_single_content_collection_skips_creator_profile_fetch(
                 latest_collect_count=5,
                 latest_share_count=1,
                 status="active",
-                data_source="tikomni_douyin",
+                data_source="tikhub_douyin",
                 metrics_status="success",
             )
         )
@@ -627,9 +770,303 @@ def test_single_content_collection_skips_creator_profile_fetch(
     assert run.result_summary["collection_scope"] == "single_content_metrics"
     assert run.result_summary["creator_profile_fetch_skipped"] is True
     assert run.result_summary["content_list_fetch_skipped"] is True
-    assert run.result_summary["tikomni_request_count"] == 1
-    assert run.result_summary["tikomni_endpoints"] == ["fetch_multi_video_statistics"]
+    assert run.result_summary["tikhub_request_count"] == 1
+    assert run.result_summary["tikhub_endpoints"] == ["fetch_multi_video_statistics"]
     assert post.latest_like_count == 45
     assert post.latest_comment_count == 6
     assert post.latest_collect_count == 7
     assert post.latest_share_count == 3
+
+
+def test_single_content_collection_fetches_missing_creator_profile(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    class SingleContentProfileCollector:
+        collector_type = "tikhub_douyin"
+        version = "test-single-content-profile-v1"
+        content_status = "metrics_refreshed"
+        warnings: list[str] = []
+        last_seen_content_ids: list[str] = []
+        new_content_ids: list[str] = []
+        refreshed_content_ids = ["single-aweme-profile"]
+        baseline_created = False
+
+        def fetch_creator_profile(self, creator):
+            return CreatorProfile(
+                nickname="profile filled creator",
+                avatar_url=None,
+                bio="profile bio",
+                verified_info=None,
+                location="Shandong",
+                follower_count=1234,
+                following_count=12,
+                total_like_count=8888,
+                content_count=34,
+            )
+
+        def fetch_content_posts(self, creator):
+            assert creator.monitor_scope == "single_content"
+            assert creator.follower_count == 1234
+            assert creator.content_count == 34
+            assert len(creator.tracked_content_posts) == 1
+            return [
+                ContentProfile(
+                    platform_content_id="single-aweme-profile",
+                    title="Single tracked work with profile",
+                    summary=None,
+                    content_type="video",
+                    content_url="https://www.douyin.com/video/single-aweme-profile",
+                    cover_url=None,
+                    published_at=None,
+                    like_count=55,
+                    comment_count=7,
+                    collect_count=8,
+                    share_count=4,
+                    metrics_status="success",
+                    raw_data={"tracking_refresh": True},
+                )
+            ]
+
+        def usage_summary(self):
+            return {
+                "tikhub_request_count": 2,
+                "tikhub_estimated_cost_usd": 0.039,
+                "tikhub_endpoints": ["handler_user_profile", "fetch_multi_video_statistics"],
+                "tikhub_budget_limited": False,
+            }
+
+    monkeypatch.setattr(
+        "app.services.creators.get_collector",
+        lambda creator: SingleContentProfileCollector(),
+    )
+    create_response = client.post(
+        "/api/v1/creators",
+        json={
+            **CREATOR_PAYLOAD,
+            "platform_account_id": "single-content-missing-profile",
+            "nickname": "missing profile creator",
+            "collector_type": "tikhub_douyin",
+            "monitor_scope": "single_content",
+            "follower_count": 0,
+            "following_count": 0,
+            "total_like_count": 0,
+            "content_count": 0,
+        },
+    )
+    creator_id = create_response.json()["id"]
+
+    override = app.dependency_overrides[get_db]
+    db_gen = override()
+    db = next(db_gen)
+    try:
+        db.add(
+            ContentPost(
+                creator_id=creator_id,
+                platform_content_id="single-aweme-profile",
+                title="Single tracked work with profile",
+                summary=None,
+                content_type="video",
+                content_url="https://www.douyin.com/video/single-aweme-profile",
+                cover_url=None,
+                latest_like_count=40,
+                latest_comment_count=5,
+                latest_collect_count=6,
+                latest_share_count=2,
+                status="active",
+                data_source="tikhub_douyin",
+                metrics_status="success",
+            )
+        )
+        db.commit()
+
+        creator = get_creator(db, creator_id)
+        creator, snapshot, run = collect_creator(
+            db,
+            creator,
+            trigger_source="scheduled",
+            include_content=True,
+        )
+        post = db.scalar(
+            select(ContentPost).where(
+                ContentPost.creator_id == creator_id,
+                ContentPost.platform_content_id == "single-aweme-profile",
+            )
+        )
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+    assert creator.follower_count == 1234
+    assert creator.content_count == 34
+    assert creator.total_like_count == 8888
+    assert snapshot.follower_count == 1234
+    assert run.status == "success"
+    assert run.result_summary["collection_scope"] == "single_content_profile_and_metrics"
+    assert run.result_summary["creator_profile_fetch_skipped"] is False
+    assert run.result_summary["content_list_fetch_skipped"] is True
+    assert run.result_summary["tikhub_request_count"] == 2
+    assert post.latest_like_count == 55
+    assert post.latest_comment_count == 7
+    assert post.latest_collect_count == 8
+    assert post.latest_share_count == 4
+
+
+def test_update_creator_rejects_tikhub_for_non_douyin(client: TestClient) -> None:
+    create_response = client.post(
+        "/api/v1/creators",
+        json={
+            **CREATOR_PAYLOAD,
+            "platform": "xiaohongshu",
+            "platform_account_id": "xhs-tikhub-update",
+            "profile_url": "https://www.xiaohongshu.com/user/profile/xhs-tikhub-update",
+            "collector_type": "mock",
+        },
+    )
+    assert create_response.status_code == 201
+
+    response = client.patch(
+        f"/api/v1/creators/{create_response.json()['id']}",
+        json={"collector_type": "tikhub_douyin"},
+    )
+
+    assert response.status_code == 422
+    assert "抖音真实采集器只能用于抖音账号" in response.json()["detail"]
+
+
+def test_single_content_collection_refreshes_profile_when_interval_zero(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    class AlwaysRefreshProfileCollector:
+        collector_type = "tikhub_douyin"
+        version = "test-single-content-always-refresh-v1"
+        content_status = "metrics_refreshed"
+        warnings: list[str] = []
+        last_seen_content_ids: list[str] = []
+        new_content_ids: list[str] = []
+        refreshed_content_ids = ["single-aweme-always-refresh"]
+        baseline_created = False
+
+        def fetch_creator_profile(self, creator):
+            return CreatorProfile(
+                nickname="always refreshed creator",
+                avatar_url=None,
+                bio="fresh profile bio",
+                verified_info=None,
+                location="Shandong",
+                follower_count=4321,
+                following_count=21,
+                total_like_count=9999,
+                content_count=56,
+            )
+
+        def fetch_content_posts(self, creator):
+            assert creator.follower_count == 4321
+            assert creator.content_count == 56
+            return [
+                ContentProfile(
+                    platform_content_id="single-aweme-always-refresh",
+                    title="Single tracked work always refresh",
+                    summary=None,
+                    content_type="video",
+                    content_url="https://www.douyin.com/video/single-aweme-always-refresh",
+                    cover_url=None,
+                    published_at=None,
+                    like_count=65,
+                    comment_count=8,
+                    collect_count=9,
+                    share_count=5,
+                    metrics_status="success",
+                    raw_data={"tracking_refresh": True},
+                )
+            ]
+
+        def usage_summary(self):
+            return {
+                "tikhub_request_count": 2,
+                "tikhub_estimated_cost_usd": 0.039,
+                "tikhub_endpoints": ["handler_user_profile", "fetch_multi_video_statistics"],
+                "tikhub_budget_limited": False,
+            }
+
+    monkeypatch.setattr("app.services.creators.settings.single_content_profile_refresh_interval_hours", 0)
+    monkeypatch.setattr(
+        "app.services.creators.get_collector",
+        lambda creator: AlwaysRefreshProfileCollector(),
+    )
+    create_response = client.post(
+        "/api/v1/creators",
+        json={
+            **CREATOR_PAYLOAD,
+            "platform_account_id": "single-content-always-refresh",
+            "nickname": "existing profile creator",
+            "collector_type": "tikhub_douyin",
+            "monitor_scope": "single_content",
+            "follower_count": 99,
+            "following_count": 8,
+            "total_like_count": 777,
+            "content_count": 2,
+        },
+    )
+    creator_id = create_response.json()["id"]
+
+    override = app.dependency_overrides[get_db]
+    db_gen = override()
+    db = next(db_gen)
+    try:
+        db.add(
+            CollectionRun(
+                creator_id=creator_id,
+                status="success",
+                trigger_source="scheduled",
+                collector_type="tikhub_douyin",
+                result_summary={
+                    "collection_scope": "single_content_profile_and_metrics",
+                    "creator_profile_fetch_skipped": False,
+                    "content_list_fetch_skipped": True,
+                },
+            )
+        )
+        db.add(
+            ContentPost(
+                creator_id=creator_id,
+                platform_content_id="single-aweme-always-refresh",
+                title="Single tracked work always refresh",
+                summary=None,
+                content_type="video",
+                content_url="https://www.douyin.com/video/single-aweme-always-refresh",
+                cover_url=None,
+                latest_like_count=40,
+                latest_comment_count=5,
+                latest_collect_count=6,
+                latest_share_count=2,
+                status="active",
+                data_source="tikhub_douyin",
+                metrics_status="success",
+            )
+        )
+        db.commit()
+
+        creator = get_creator(db, creator_id)
+        creator, snapshot, run = collect_creator(
+            db,
+            creator,
+            trigger_source="scheduled",
+            include_content=True,
+        )
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+    assert creator.follower_count == 4321
+    assert creator.content_count == 56
+    assert snapshot.follower_count == 4321
+    assert run.status == "success"
+    assert run.result_summary["collection_scope"] == "single_content_profile_and_metrics"
+    assert run.result_summary["creator_profile_fetch_skipped"] is False
+    assert run.result_summary["content_list_fetch_skipped"] is True

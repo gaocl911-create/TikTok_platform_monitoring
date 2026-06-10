@@ -62,7 +62,7 @@ async function collect() {
     if (!('run' in result)) {
       ElMessage.warning('首次采集失败，已加入自动重试队列，可在“采集运行”查看进度')
     } else if (result.run.result_summary?.content_status === 'budget_limited') {
-      ElMessage.warning('TikOmni 预算已达上限，本次已停止继续调用真实 API')
+      ElMessage.warning('TikHub 预算已达上限，本次已停止继续调用真实 API')
     } else if (result.run.status === 'partial') {
       ElMessage.warning('真实账号指标已更新，部分作品指标暂不可用')
     } else {
@@ -169,7 +169,7 @@ onMounted(load)
                 : creator.last_content_status === 'metrics_refreshed'
                 ? '已刷新作品增长指标'
                 : creator.last_content_status === 'budget_limited'
-                ? 'TikOmni 预算限制'
+                ? '真实 API 预算限制'
                 : creator.last_content_status === 'partial'
                 ? '部分作品指标可用'
                 : '真实作品明细暂不可用'

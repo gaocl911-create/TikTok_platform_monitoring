@@ -1,7 +1,7 @@
 export type Platform = 'douyin' | 'xiaohongshu'
 export type Priority = 'high' | 'normal' | 'low'
 export type MonitoringStatus = 'active' | 'paused'
-export type CollectorType = 'mock' | 'douyin_public_web' | 'tikomni_douyin'
+export type CollectorType = 'mock' | 'douyin_public_web' | 'tikhub_douyin'
 export type MonitorScope = 'creator_collection' | 'single_content'
 export type DataQualityStatus = 'pending' | 'mock' | 'verified' | 'partial' | 'failed'
 export type ContentCollectionStatus =
